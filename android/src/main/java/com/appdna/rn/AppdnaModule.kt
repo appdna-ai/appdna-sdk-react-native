@@ -105,17 +105,23 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
         promise.resolve(null)
     }
 
-    // MARK: - Paywalls & Onboarding (placeholder)
+    // MARK: - Paywalls & Onboarding
 
     @ReactMethod
     fun presentPaywall(id: String, context: ReadableMap?, promise: Promise) {
-        // Android paywall rendering TBD
+        val activity = currentActivity
+        if (activity != null) {
+            AppDNA.presentPaywall(activity, id)
+        }
         promise.resolve(null)
     }
 
     @ReactMethod
     fun presentOnboarding(flowId: String, promise: Promise) {
-        // Android onboarding rendering TBD
+        val activity = currentActivity
+        if (activity != null) {
+            AppDNA.presentOnboarding(activity, flowId)
+        }
         promise.resolve(null)
     }
 
