@@ -25,17 +25,21 @@ export default function App() {
     await AppDNA.configure('YOUR_API_KEY');
     setStatus('Configured');
 
-    // 2. Identify user
+    // 2. Wait for SDK to be fully ready (config fetched, etc.)
+    await AppDNA.onReady();
+    setStatus('Ready');
+
+    // 3. Identify user
     await AppDNA.identify('user_123', { email: 'demo@example.com' });
     setStatus('Identified');
 
-    // 3. Check for deferred deep link (first launch)
+    // 4. Check for deferred deep link (first launch)
     const link = await AppDNA.checkDeferredDeepLink();
     if (link) {
       setDeepLink(link);
     }
 
-    // 4. Listen for web entitlement changes
+    // 5. Listen for web entitlement changes
     const unsubscribe = AppDNA.onWebEntitlementChanged((entitlement) => {
       setWebEntitlement(entitlement);
     });

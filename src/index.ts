@@ -4,9 +4,10 @@ import type {
   DeferredDeepLink,
   PaywallContext,
   AppDNAEnvironment,
+  AppDNAOptions,
 } from './types';
 
-export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment };
+export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
 
 const { AppdnaModule } = NativeModules;
 const eventEmitter = new NativeEventEmitter(AppdnaModule);
@@ -19,9 +20,10 @@ export class AppDNA {
   /** Initialize the SDK. Call once at app startup. */
   static async configure(
     apiKey: string,
-    env: AppDNAEnvironment = 'production'
+    env: AppDNAEnvironment = 'production',
+    options?: AppDNAOptions
   ): Promise<void> {
-    return AppdnaModule.configure(apiKey, env);
+    return AppdnaModule.configure(apiKey, env, options ?? null);
   }
 
   /** Identify a user. */
@@ -111,6 +113,18 @@ export class AppDNA {
     return AppdnaModule.setConsent(analytics);
   }
 
+  // MARK: - Ready
+
+  /**
+   * Returns a Promise that resolves when the SDK is fully initialized
+   * (config fetched, managers ready). If already ready, resolves immediately.
+   * Call after `configure()` to gate any logic that depends on remote config,
+   * experiments, feature flags, or deep links.
+   */
+  static async onReady(): Promise<void> {
+    await AppdnaModule.onReady();
+  }
+
   // MARK: - v0.3: Web Entitlements
 
   /** Get the current web subscription entitlement. */
@@ -134,5 +148,20 @@ export class AppDNA {
   /** Check for a deferred deep link on first launch. */
   static async checkDeferredDeepLink(): Promise<DeferredDeepLink | null> {
     return AppdnaModule.checkDeferredDeepLink();
+  }
+
+  // MARK: - Lifecycle
+
+  /**
+   * Shut down the SDK and release resources.
+   * On Android this delegates to AppDNA.shutdown(); on iOS this is a no-op.
+   */
+  static async shutdown(): Promise<void> {
+    return AppdnaModule.shutdown();
+  }
+
+  /** Get the native SDK version string (e.g. "0.3.0"). */
+  static async getSdkVersion(): Promise<string> {
+    return AppdnaModule.getSdkVersion();
   }
 }

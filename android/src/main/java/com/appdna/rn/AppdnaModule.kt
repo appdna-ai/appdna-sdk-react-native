@@ -1,7 +1,9 @@
 package com.appdna.rn
 
 import ai.appdna.sdk.AppDNA
+import ai.appdna.sdk.AppDNAOptions
 import ai.appdna.sdk.Environment
+import ai.appdna.sdk.LogLevel
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 
@@ -19,9 +21,10 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
     // MARK: - Core
 
     @ReactMethod
-    fun configure(apiKey: String, env: String, promise: Promise) {
+    fun configure(apiKey: String, env: String, options: ReadableMap?, promise: Promise) {
         val environment = if (env == "staging") Environment.SANDBOX else Environment.PRODUCTION
-        AppDNA.configure(reactApplicationContext, apiKey, environment)
+        val opts = parseOptions(options)
+        AppDNA.configure(reactApplicationContext, apiKey, environment, opts)
 
         // Register web entitlement listener
         AppDNA.onWebEntitlementChanged { entitlement ->
@@ -125,6 +128,15 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
         promise.resolve(null)
     }
 
+    // MARK: - Ready
+
+    @ReactMethod
+    fun onReady(promise: Promise) {
+        AppDNA.onReady {
+            promise.resolve(null)
+        }
+    }
+
     // MARK: - v0.3: Web Entitlements
 
     @ReactMethod
@@ -150,7 +162,40 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    // MARK: - Lifecycle
+
+    @ReactMethod
+    fun shutdown(promise: Promise) {
+        AppDNA.shutdown()
+        promise.resolve(null)
+    }
+
+    @ReactMethod
+    fun getSdkVersion(promise: Promise) {
+        promise.resolve(AppDNA.sdkVersion)
+    }
+
     // MARK: - Helpers
+
+    private fun parseOptions(map: ReadableMap?): AppDNAOptions {
+        if (map == null) return AppDNAOptions()
+        val logLevel = if (map.hasKey("logLevel")) {
+            when (map.getString("logLevel")) {
+                "none" -> LogLevel.NONE
+                "error" -> LogLevel.ERROR
+                "warning" -> LogLevel.WARNING
+                "info" -> LogLevel.INFO
+                "debug" -> LogLevel.DEBUG
+                else -> LogLevel.WARNING
+            }
+        } else LogLevel.WARNING
+        return AppDNAOptions(
+            flushInterval = if (map.hasKey("flushInterval")) map.getDouble("flushInterval").toLong() else 30L,
+            batchSize = if (map.hasKey("batchSize")) map.getInt("batchSize") else 20,
+            configTTL = if (map.hasKey("configTTL")) map.getDouble("configTTL").toLong() else 300L,
+            logLevel = logLevel
+        )
+    }
 
     private fun toWritableMap(map: Map<String, Any?>): WritableMap {
         val writableMap = Arguments.createMap()
