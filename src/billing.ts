@@ -90,15 +90,15 @@ export class AppDNABilling {
    * Set a delegate to receive billing lifecycle callbacks.
    */
   static setDelegate(delegate: {
-    onPurchaseCompleted?(productId: string): void;
+    onPurchaseCompleted?(productId: string, transaction: Record<string, unknown>): void;
     onPurchaseFailed?(productId: string, error: string): void;
     onEntitlementsChanged?(entitlements: Entitlement[]): void;
-    onRestoreCompleted?(entitlements: Entitlement[]): void;
+    onRestoreCompleted?(restoredProducts: string[]): void;
   }): void {
     const emitter = new NativeEventEmitter(AppdnaBillingModule);
     if (delegate.onPurchaseCompleted) {
-      emitter.addListener('onPurchaseCompleted', (data: { productId: string }) =>
-        delegate.onPurchaseCompleted!(data.productId));
+      emitter.addListener('onPurchaseCompleted', (data: { productId: string; transaction: Record<string, unknown> }) =>
+        delegate.onPurchaseCompleted!(data.productId, data.transaction ?? {}));
     }
     if (delegate.onPurchaseFailed) {
       emitter.addListener('onPurchaseFailed', (data: { productId: string; error: string }) =>
@@ -109,8 +109,8 @@ export class AppDNABilling {
         delegate.onEntitlementsChanged!(entitlements));
     }
     if (delegate.onRestoreCompleted) {
-      emitter.addListener('onRestoreCompleted', (entitlements: Entitlement[]) =>
-        delegate.onRestoreCompleted!(entitlements));
+      emitter.addListener('onRestoreCompleted', (data: { restoredProducts: string[] }) =>
+        delegate.onRestoreCompleted!(data.restoredProducts ?? []));
     }
   }
 }
