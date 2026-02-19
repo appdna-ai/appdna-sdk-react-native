@@ -6,6 +6,7 @@ import type {
   AppDNAEnvironment,
   AppDNAOptions,
 } from './types';
+import type { Entitlement, PurchaseResult, ProductInfo } from './billing';
 
 export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
 export { AppDNABilling } from './billing';
@@ -15,6 +16,61 @@ export type { PushPayload } from './push';
 
 const { AppdnaModule } = NativeModules;
 const eventEmitter = new NativeEventEmitter(AppdnaModule);
+
+// MARK: - Delegate / Listener Interfaces (SPEC-041)
+
+/** Delegate for onboarding lifecycle events. */
+export interface AppDNAOnboardingDelegate {
+  onStarted(flowId: string): void;
+  onStepChanged(flowId: string, stepIndex: number): void;
+  onCompleted(flowId: string): void;
+  onDismissed(flowId: string): void;
+}
+
+/** Delegate for paywall lifecycle events. */
+export interface AppDNAPaywallDelegate {
+  onPresented(paywallId: string): void;
+  onAction(paywallId: string, action: string): void;
+  onPurchaseStarted(paywallId: string, productId: string): void;
+  onPurchaseCompleted(paywallId: string, productId: string): void;
+  onPurchaseFailed(paywallId: string, productId: string, error: string): void;
+  onDismissed(paywallId: string): void;
+}
+
+/** Delegate for push notification events. */
+export interface AppDNAPushDelegate {
+  onTokenRegistered(token: string): void;
+  onPushReceived(payload: Record<string, unknown>): void;
+  onPushTapped(payload: Record<string, unknown>): void;
+}
+
+/** Delegate for billing events. */
+export interface AppDNABillingDelegate {
+  onPurchaseCompleted(productId: string): void;
+  onPurchaseFailed(productId: string, error: string): void;
+  onEntitlementsChanged(entitlements: Entitlement[]): void;
+  onRestoreCompleted(entitlements: Entitlement[]): void;
+}
+
+/** Delegate for in-app message events. */
+export interface AppDNAInAppMessageDelegate {
+  onMessageShown(messageId: string): void;
+  onMessageAction(messageId: string, action: string): void;
+  onMessageDismissed(messageId: string): void;
+  shouldShowMessage(messageId: string): boolean;
+}
+
+/** Delegate for survey events. */
+export interface AppDNASurveyDelegate {
+  onSurveyPresented(surveyId: string): void;
+  onSurveyCompleted(surveyId: string, responses: Record<string, unknown>): void;
+  onSurveyDismissed(surveyId: string): void;
+}
+
+/** Delegate for deep link events. */
+export interface AppDNADeepLinkDelegate {
+  onDeepLinkReceived(url: string, params?: Record<string, string>): void;
+}
 
 /**
  * Main entry point for the AppDNA React Native SDK.
@@ -28,6 +84,11 @@ export class AppDNA {
     options?: AppDNAOptions
   ): Promise<void> {
     return AppdnaModule.configure(apiKey, env, options ?? null);
+  }
+
+  /** Set log verbosity level at runtime. Valid: 'none','error','warning','info','debug'. */
+  static setLogLevel(level: string): void {
+    AppdnaModule.setLogLevel(level);
   }
 
   /** Identify a user. */
@@ -167,6 +228,181 @@ export class AppDNA {
     return AppdnaModule.checkDeferredDeepLink();
   }
 
+  // MARK: - v1.0 Module Namespaces
+
+  /** Push notification module. */
+  static push = {
+    setToken: (token: string) => AppdnaModule.setPushToken(token),
+    setPermission: (granted: boolean) => AppdnaModule.setPushPermission(granted),
+    trackDelivered: (pushId: string) => AppdnaModule.trackPushDelivered(pushId),
+    trackTapped: (pushId: string, action?: string) => AppdnaModule.trackPushTapped(pushId, action),
+    /** Request push notification permission from the OS. */
+    requestPermission: (): Promise<boolean> => AppdnaModule.requestPushPermission(),
+    /** Get the current push token. */
+    getToken: (): Promise<string | null> => AppdnaModule.getPushToken(),
+    /** Set a delegate to receive push notification callbacks. */
+    setDelegate: (delegate: AppDNAPushDelegate): void => {
+      eventEmitter.addListener('onTokenRegistered', (data: { token: string }) =>
+        delegate.onTokenRegistered(data.token));
+      eventEmitter.addListener('onPushReceived', (payload: Record<string, unknown>) =>
+        delegate.onPushReceived(payload));
+      eventEmitter.addListener('onPushTapped', (payload: Record<string, unknown>) =>
+        delegate.onPushTapped(payload));
+    },
+  };
+
+  /** Onboarding module. */
+  static onboarding = {
+    present: (flowId: string, context?: OnboardingContext) =>
+      AppdnaModule.presentOnboarding(flowId, context ?? null),
+    /** Set a delegate to receive onboarding lifecycle callbacks. */
+    setDelegate: (delegate: AppDNAOnboardingDelegate): void => {
+      eventEmitter.addListener('onOnboardingStarted', (data: { flowId: string }) =>
+        delegate.onStarted(data.flowId));
+      eventEmitter.addListener('onOnboardingStepChanged', (data: { flowId: string; stepIndex: number }) =>
+        delegate.onStepChanged(data.flowId, data.stepIndex));
+      eventEmitter.addListener('onOnboardingCompleted', (data: { flowId: string }) =>
+        delegate.onCompleted(data.flowId));
+      eventEmitter.addListener('onOnboardingDismissed', (data: { flowId: string }) =>
+        delegate.onDismissed(data.flowId));
+    },
+  };
+
+  /** Paywall module. */
+  static paywall = {
+    present: (paywallId: string, context?: PaywallContext) =>
+      AppdnaModule.presentPaywall(paywallId, context ?? null),
+    /** Set a delegate to receive paywall lifecycle callbacks. */
+    setDelegate: (delegate: AppDNAPaywallDelegate): void => {
+      eventEmitter.addListener('onPaywallPresented', (data: { paywallId: string }) =>
+        delegate.onPresented(data.paywallId));
+      eventEmitter.addListener('onPaywallAction', (data: { paywallId: string; action: string }) =>
+        delegate.onAction(data.paywallId, data.action));
+      eventEmitter.addListener('onPaywallPurchaseStarted', (data: { paywallId: string; productId: string }) =>
+        delegate.onPurchaseStarted(data.paywallId, data.productId));
+      eventEmitter.addListener('onPaywallPurchaseCompleted', (data: { paywallId: string; productId: string }) =>
+        delegate.onPurchaseCompleted(data.paywallId, data.productId));
+      eventEmitter.addListener('onPaywallPurchaseFailed', (data: { paywallId: string; productId: string; error: string }) =>
+        delegate.onPurchaseFailed(data.paywallId, data.productId, data.error));
+      eventEmitter.addListener('onPaywallDismissed', (data: { paywallId: string }) =>
+        delegate.onDismissed(data.paywallId));
+    },
+  };
+
+  /** Remote config module. */
+  static remoteConfig = {
+    get: (key: string): Promise<unknown> => AppdnaModule.getRemoteConfig(key),
+    refresh: (): Promise<void> => AppdnaModule.refreshConfig(),
+    /** Get all remote config values as a map. */
+    getAll: (): Promise<Record<string, unknown>> => AppdnaModule.getAllRemoteConfig(),
+    /** Register a callback for remote config changes. Returns unsubscribe function. */
+    onChanged: (callback: () => void): (() => void) => {
+      const sub = eventEmitter.addListener('onRemoteConfigChanged', callback);
+      return () => sub.remove();
+    },
+  };
+
+  /** Feature flags module. */
+  static features = {
+    isEnabled: (flag: string): Promise<boolean> => AppdnaModule.isFeatureEnabled(flag),
+    /** Get the variant value for a feature flag (for multi-variate flags). */
+    getVariant: (flag: string): Promise<unknown> => AppdnaModule.getFeatureVariant(flag),
+    /** Register a callback for feature flag changes. Returns unsubscribe function. */
+    onChanged: (callback: () => void): (() => void) => {
+      const sub = eventEmitter.addListener('onFeatureFlagsChanged', callback);
+      return () => sub.remove();
+    },
+  };
+
+  /** Experiments module. */
+  static experiments = {
+    getVariant: (experimentId: string): Promise<string | null> =>
+      AppdnaModule.getExperimentVariant(experimentId),
+    isInVariant: (experimentId: string, variantId: string): Promise<boolean> =>
+      AppdnaModule.isInVariant(experimentId, variantId),
+    /** Get all experiment exposures for the current user. */
+    getExposures: (): Promise<Array<Record<string, unknown>>> =>
+      AppdnaModule.getExperimentExposures(),
+  };
+
+  /** In-app messages module. */
+  static inAppMessages = {
+    suppressDisplay: (suppress: boolean): Promise<void> =>
+      AppdnaModule.suppressMessages(suppress),
+    /** Set a delegate to receive in-app message lifecycle callbacks. */
+    setDelegate: (delegate: AppDNAInAppMessageDelegate): void => {
+      eventEmitter.addListener('onMessageShown', (data: { messageId: string }) =>
+        delegate.onMessageShown(data.messageId));
+      eventEmitter.addListener('onMessageAction', (data: { messageId: string; action: string }) =>
+        delegate.onMessageAction(data.messageId, data.action));
+      eventEmitter.addListener('onMessageDismissed', (data: { messageId: string }) =>
+        delegate.onMessageDismissed(data.messageId));
+      eventEmitter.addListener('shouldShowMessage', (data: { messageId: string }) => {
+        const result = delegate.shouldShowMessage(data.messageId);
+        return result;
+      });
+    },
+  };
+
+  /** Surveys module. */
+  static surveys = {
+    present: (surveyId: string): Promise<void> => AppdnaModule.presentSurvey(surveyId),
+    /** Set a delegate to receive survey lifecycle callbacks. */
+    setDelegate: (delegate: AppDNASurveyDelegate): void => {
+      eventEmitter.addListener('onSurveyPresented', (data: { surveyId: string }) =>
+        delegate.onSurveyPresented(data.surveyId));
+      eventEmitter.addListener('onSurveyCompleted', (data: { surveyId: string; responses: Record<string, unknown> }) =>
+        delegate.onSurveyCompleted(data.surveyId, data.responses));
+      eventEmitter.addListener('onSurveyDismissed', (data: { surveyId: string }) =>
+        delegate.onSurveyDismissed(data.surveyId));
+    },
+  };
+
+  /** Deep links module. */
+  static deepLinks = {
+    handleURL: (url: string): Promise<void> => AppdnaModule.handleDeepLink(url),
+    /** Set a delegate to receive deep link callbacks. */
+    setDelegate: (delegate: AppDNADeepLinkDelegate): void => {
+      eventEmitter.addListener('onDeepLinkReceived', (data: { url: string; params?: Record<string, string> }) =>
+        delegate.onDeepLinkReceived(data.url, data.params));
+    },
+  };
+
+  /** Billing module namespace. Mirrors AppDNABilling methods for convenience. */
+  static billing = {
+    /** Get localized product information from the store. */
+    getProducts: (productIds: string[]): Promise<ProductInfo[]> =>
+      AppdnaModule.getProducts(productIds),
+    /** Purchase a product by its store product ID. */
+    purchase: (productId: string, offerToken?: string): Promise<PurchaseResult> =>
+      AppdnaModule.purchase(productId, offerToken ?? null),
+    /** Restore previously purchased products. */
+    restorePurchases: (): Promise<Entitlement[]> =>
+      AppdnaModule.restorePurchases(),
+    /** Check if the user has an active subscription. */
+    hasActiveSubscription: (): Promise<boolean> =>
+      AppdnaModule.hasActiveSubscription(),
+    /** Get all current entitlements for the user. */
+    getEntitlements: (): Promise<Entitlement[]> =>
+      AppdnaModule.getEntitlements(),
+    /** Listen for entitlement changes. Returns unsubscribe function. */
+    onEntitlementsChanged: (callback: (entitlements: Entitlement[]) => void): (() => void) => {
+      const sub = eventEmitter.addListener('onEntitlementsChanged', callback);
+      return () => sub.remove();
+    },
+    /** Set a delegate to receive billing lifecycle callbacks. */
+    setDelegate: (delegate: AppDNABillingDelegate): void => {
+      eventEmitter.addListener('onBillingPurchaseCompleted', (data: { productId: string }) =>
+        delegate.onPurchaseCompleted(data.productId));
+      eventEmitter.addListener('onBillingPurchaseFailed', (data: { productId: string; error: string }) =>
+        delegate.onPurchaseFailed(data.productId, data.error));
+      eventEmitter.addListener('onBillingEntitlementsChanged', (data: { entitlements: Entitlement[] }) =>
+        delegate.onEntitlementsChanged(data.entitlements));
+      eventEmitter.addListener('onBillingRestoreCompleted', (data: { entitlements: Entitlement[] }) =>
+        delegate.onRestoreCompleted(data.entitlements));
+    },
+  };
+
   // MARK: - Lifecycle
 
   /**
@@ -177,8 +413,17 @@ export class AppDNA {
     return AppdnaModule.shutdown();
   }
 
-  /** Get the native SDK version string (e.g. "0.3.0"). */
+  /** Get the native SDK version string (e.g. "1.0.0"). */
   static async getSdkVersion(): Promise<string> {
     return AppdnaModule.getSdkVersion();
   }
+}
+
+/** Context passed to onboarding flows for dynamic branching. */
+export interface OnboardingContext {
+  source?: string;
+  campaign?: string;
+  referrer?: string;
+  userProperties?: Record<string, unknown>;
+  experimentOverrides?: Record<string, string>;
 }

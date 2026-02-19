@@ -78,4 +78,39 @@ export class AppDNABilling {
     const sub = eventEmitter.addListener('onEntitlementsChanged', callback);
     return () => sub.remove();
   }
+
+  /**
+   * Get all current entitlements for the user.
+   */
+  static async getEntitlements(): Promise<Entitlement[]> {
+    return AppdnaBillingModule.getEntitlements();
+  }
+
+  /**
+   * Set a delegate to receive billing lifecycle callbacks.
+   */
+  static setDelegate(delegate: {
+    onPurchaseCompleted?(productId: string): void;
+    onPurchaseFailed?(productId: string, error: string): void;
+    onEntitlementsChanged?(entitlements: Entitlement[]): void;
+    onRestoreCompleted?(entitlements: Entitlement[]): void;
+  }): void {
+    const emitter = new NativeEventEmitter(AppdnaBillingModule);
+    if (delegate.onPurchaseCompleted) {
+      emitter.addListener('onPurchaseCompleted', (data: { productId: string }) =>
+        delegate.onPurchaseCompleted!(data.productId));
+    }
+    if (delegate.onPurchaseFailed) {
+      emitter.addListener('onPurchaseFailed', (data: { productId: string; error: string }) =>
+        delegate.onPurchaseFailed!(data.productId, data.error));
+    }
+    if (delegate.onEntitlementsChanged) {
+      emitter.addListener('onEntitlementsChanged', (entitlements: Entitlement[]) =>
+        delegate.onEntitlementsChanged!(entitlements));
+    }
+    if (delegate.onRestoreCompleted) {
+      emitter.addListener('onRestoreCompleted', (entitlements: Entitlement[]) =>
+        delegate.onRestoreCompleted!(entitlements));
+    }
+  }
 }
