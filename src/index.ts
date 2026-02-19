@@ -10,6 +10,8 @@ import type {
 export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
 export { AppDNABilling } from './billing';
 export type { Entitlement, PurchaseResult, ProductInfo } from './billing';
+export { AppDNAPush } from './push';
+export type { PushPayload } from './push';
 
 const { AppdnaModule } = NativeModules;
 const eventEmitter = new NativeEventEmitter(AppdnaModule);
@@ -100,7 +102,7 @@ export class AppDNA {
     return AppdnaModule.getExperimentConfig(experimentId, key);
   }
 
-  /** Set push token. */
+  /** Set push token. Registers with backend for direct push delivery. */
   static async setPushToken(token: string): Promise<void> {
     return AppdnaModule.setPushToken(token);
   }
@@ -108,6 +110,19 @@ export class AppDNA {
   /** Report push permission status. */
   static async setPushPermission(granted: boolean): Promise<void> {
     return AppdnaModule.setPushPermission(granted);
+  }
+
+  /** Track push notification delivered (SPEC-030). */
+  static async trackPushDelivered(pushId: string): Promise<void> {
+    return AppdnaModule.trackPushDelivered(pushId);
+  }
+
+  /** Track push notification tapped (SPEC-030). */
+  static async trackPushTapped(
+    pushId: string,
+    action?: string
+  ): Promise<void> {
+    return AppdnaModule.trackPushTapped(pushId, action);
   }
 
   /** Set analytics consent. */

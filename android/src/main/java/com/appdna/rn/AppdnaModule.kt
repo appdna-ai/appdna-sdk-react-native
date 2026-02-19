@@ -109,6 +109,18 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
         promise.resolve(null)
     }
 
+    @ReactMethod
+    fun trackPushDelivered(pushId: String, promise: Promise) {
+        AppDNA.trackPushDelivered(pushId)
+        promise.resolve(null)
+    }
+
+    @ReactMethod
+    fun trackPushTapped(pushId: String, action: String?, promise: Promise) {
+        AppDNA.trackPushTapped(pushId, action)
+        promise.resolve(null)
+    }
+
     // MARK: - Privacy
 
     @ReactMethod

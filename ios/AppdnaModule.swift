@@ -110,6 +110,16 @@ class AppdnaModule: RCTEventEmitter {
         resolve(nil)
     }
 
+    @objc func trackPushDelivered(_ pushId: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        AppDNA.trackPushDelivered(pushId: pushId)
+        resolve(nil)
+    }
+
+    @objc func trackPushTapped(_ pushId: String, action: NSString?, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        AppDNA.trackPushTapped(pushId: pushId, action: action as String?)
+        resolve(nil)
+    }
+
     // MARK: - Privacy
 
     @objc func setConsent(_ analytics: Bool, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
