@@ -6,13 +6,22 @@ import ai.appdna.sdk.Environment
 import ai.appdna.sdk.LogLevel
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import kotlinx.coroutines.*
 
 class AppdnaModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
     override fun getName(): String = "AppdnaModule"
 
     private fun sendEvent(eventName: String, params: WritableMap?) {
+        reactApplicationContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit(eventName, params)
+    }
+
+    private fun sendEvent(eventName: String, params: WritableArray?) {
         reactApplicationContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
             .emit(eventName, params)
@@ -173,6 +182,71 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun getSdkVersion(promise: Promise) {
         promise.resolve(AppDNA.sdkVersion)
+    }
+
+    // MARK: - Billing
+
+    @ReactMethod
+    fun purchase(productId: String, offerToken: String?, promise: Promise) {
+        scope.launch {
+            try {
+                val result = AppDNA.billing.purchase(productId, offerToken)
+                promise.resolve(toWritableMap(result.toMap()))
+            } catch (e: Exception) {
+                promise.reject("PURCHASE_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun restorePurchases(promise: Promise) {
+        scope.launch {
+            try {
+                val entitlements = AppDNA.billing.restorePurchases()
+                val array = Arguments.createArray()
+                entitlements.forEach { array.pushMap(toWritableMap(it.toMap())) }
+                promise.resolve(array)
+            } catch (e: Exception) {
+                promise.reject("RESTORE_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getProducts(productIds: ReadableArray, promise: Promise) {
+        val ids = (0 until productIds.size()).map { productIds.getString(it) }
+        scope.launch {
+            try {
+                val products = AppDNA.billing.getProducts(ids)
+                val array = Arguments.createArray()
+                products.forEach { array.pushMap(toWritableMap(it.toMap())) }
+                promise.resolve(array)
+            } catch (e: Exception) {
+                promise.reject("PRODUCTS_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun hasActiveSubscription(promise: Promise) {
+        scope.launch {
+            try {
+                val hasActive = AppDNA.billing.hasActiveSubscription()
+                promise.resolve(hasActive)
+            } catch (e: Exception) {
+                promise.reject("SUBSCRIPTION_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun startEntitlementObserver(promise: Promise) {
+        AppDNA.billing.onEntitlementsChanged { entitlements ->
+            val array = Arguments.createArray()
+            entitlements.forEach { array.pushMap(toWritableMap(it.toMap())) }
+            sendEvent("onEntitlementsChanged", array)
+        }
+        promise.resolve(null)
     }
 
     // MARK: - Helpers

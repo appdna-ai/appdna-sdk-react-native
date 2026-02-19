@@ -13,7 +13,7 @@ class AppdnaModule: RCTEventEmitter {
     }
 
     override func supportedEvents() -> [String] {
-        return ["onWebEntitlementChanged"]
+        return ["onWebEntitlementChanged", "onEntitlementsChanged"]
     }
 
     // MARK: - Core
@@ -156,6 +156,57 @@ class AppdnaModule: RCTEventEmitter {
 
     @objc func getSdkVersion(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         resolve(AppDNA.sdkVersion)
+    }
+
+    // MARK: - Billing
+
+    @objc func purchase(_ productId: String, offerToken: NSString?, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        Task {
+            do {
+                let result = try await AppDNA.billing.purchase(productId: productId, offerToken: offerToken as String?)
+                resolve(result.toMap())
+            } catch {
+                reject("PURCHASE_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+
+    @objc func restorePurchases(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        Task {
+            do {
+                let entitlements = try await AppDNA.billing.restorePurchases()
+                resolve(entitlements.map { $0.toMap() })
+            } catch {
+                reject("RESTORE_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+
+    @objc func getProducts(_ productIds: NSArray, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        let ids = productIds.compactMap { $0 as? String }
+        Task {
+            do {
+                let products = try await AppDNA.billing.getProducts(productIds: ids)
+                resolve(products.map { $0.toMap() })
+            } catch {
+                reject("PRODUCTS_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+
+    @objc func hasActiveSubscription(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        Task {
+            let hasActive = await AppDNA.billing.hasActiveSubscription()
+            resolve(hasActive)
+        }
+    }
+
+    @objc func startEntitlementObserver(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        AppDNA.billing.onEntitlementsChanged { [weak self] entitlements in
+            let maps = entitlements.map { $0.toMap() }
+            self?.sendEvent(withName: "onEntitlementsChanged", body: maps)
+        }
+        resolve(nil)
     }
 
     // MARK: - Helpers

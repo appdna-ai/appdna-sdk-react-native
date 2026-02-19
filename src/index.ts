@@ -8,6 +8,8 @@ import type {
 } from './types';
 
 export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
+export { AppDNABilling } from './billing';
+export type { Entitlement, PurchaseResult, ProductInfo } from './billing';
 
 const { AppdnaModule } = NativeModules;
 const eventEmitter = new NativeEventEmitter(AppdnaModule);
