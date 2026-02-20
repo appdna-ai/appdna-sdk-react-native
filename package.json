@@ -1,0 +1,20 @@
+{
+  "name": "@appdna/react-native-sdk",
+  "version": "1.0.0",
+  "description": "AppDNA SDK for React Native — analytics, experiments, paywalls, surveys, and more.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["react-native", "analytics", "sdk", "appdna"],
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.72.0"
+  },
+  "devDependencies": {
+    "@types/react-native": "^0.72.0",
+    "typescript": "^5.0.0"
+  }
+}
