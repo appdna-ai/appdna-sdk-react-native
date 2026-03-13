@@ -1,5 +1,5 @@
 {
-  "name": "@appdna/react-native-sdk",
+  "name": "@appdna-ai/react-native-sdk",
   "version": "1.0.0",
   "description": "AppDNA SDK for React Native — analytics, experiments, paywalls, surveys, and more.",
   "main": "src/index.ts",
