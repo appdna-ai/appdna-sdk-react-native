@@ -4,7 +4,7 @@ The official React Native SDK for [AppDNA](https://appdna.ai) — the growth con
 
 > ⚠️ **Proprietary software.** A Commercial Agreement with AppDNA AI, Inc. is required to use this SDK. See [LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md).
 >
-> **Migrating from MIT-licensed v1.0.0 or earlier?** See [DEPRECATION_NOTICE.md](./DEPRECATION_NOTICE.md). MIT versions stop receiving server support after **15 May 2026**.
+> **Migrating from MIT-licensed v1.0.1 or earlier?** See [DEPRECATION_NOTICE.md](./DEPRECATION_NOTICE.md). MIT versions stop receiving server support after **15 May 2026**.
 
 ## What it does
 
@@ -29,9 +29,9 @@ AppDNA gives you a single drop-in SDK for the growth surfaces every subscription
 ## Installation
 
 ```bash
-npm install github:appdna-ai/appdna-sdk-react-native#v1.0.1
+npm install github:appdna-ai/appdna-sdk-react-native#v1.0.2
 # or
-yarn add github:appdna-ai/appdna-sdk-react-native#v1.0.1
+yarn add github:appdna-ai/appdna-sdk-react-native#v1.0.2
 ```
 
 For iOS, also run:
@@ -99,7 +99,7 @@ To use the SDK in your application, sign up at <https://appdna.ai> (self-serve) 
 
 **Existing customers**: your Terms of Service or Statement of Work governs your use of the SDK.
 
-**Versions before v1.0.1** were distributed under the MIT License — see [DEPRECATION_NOTICE.md](./DEPRECATION_NOTICE.md) for the migration timeline (deadline: **15 May 2026**).
+**Versions before v1.0.2** were distributed under the MIT License — see [DEPRECATION_NOTICE.md](./DEPRECATION_NOTICE.md) for the migration timeline (deadline: **15 May 2026**).
 
 ---
 

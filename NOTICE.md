@@ -32,11 +32,11 @@ If you are already an AppDNA customer with a current Commercial Agreement, your 
 
 We make the source visible because we believe transparency builds trust — you can review the code that runs in your app before you sign with us, our customers can audit security, and developers can understand integration patterns. But trust requires that the source is also protected: it represents years of investment in the AppDNA Console and SDK, and we license it commercially to fund continued development.
 
-## Prior versions (before v1.0.1)
+## Prior versions (before v1.0.2)
 
-Versions of the React Native SDK released before **v1.0.1** were distributed under the **MIT License**. Rights you obtained under MIT to those specific prior versions are unaffected by this License. **All current and future versions, starting with v1.0.1, are governed by this proprietary License** (see the LICENSE file).
+Versions of the React Native SDK released before **v1.0.2** were distributed under the **MIT License**. Rights you obtained under MIT to those specific prior versions are unaffected by this License. **All current and future versions, starting with v1.0.2, are governed by this proprietary License** (see the LICENSE file).
 
-If you are running v1.0.0 or earlier in production, see [DEPRECATION_NOTICE.md](./DEPRECATION_NOTICE.md) for the migration timeline.
+If you are running v1.0.1 or earlier in production, see [DEPRECATION_NOTICE.md](./DEPRECATION_NOTICE.md) for the migration timeline.
 
 ## Questions
 
