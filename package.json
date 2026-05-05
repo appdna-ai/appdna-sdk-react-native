@@ -7,7 +7,12 @@
   "scripts": {
     "build": "tsc"
   },
-  "keywords": ["react-native", "analytics", "sdk", "appdna"],
+  "keywords": [
+    "react-native",
+    "analytics",
+    "sdk",
+    "appdna"
+  ],
   "license": "SEE LICENSE IN LICENSE",
   "peerDependencies": {
     "react": ">=18.0.0",
