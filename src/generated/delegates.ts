@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/index.ts
 // Generator: scripts/sdk-codegen/emit-delegates.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 6fd004b5c21e59f4be687ce38d7fa348724a1370
+// Last codegen commit: 1f63af072d8c4839595d3795fb27f094282cc367
 
 /** Onboarding flow lifecycle observer. Observe-only — no return values, no async, no blocking. */
 export interface AppDNAOnboardingDelegate {
@@ -18,7 +18,7 @@ export interface AppDNAPaywallDelegate {
   onPaywallAction(paywallId: string, action: string): void;
   onPaywallPurchaseStarted(paywallId: string, productId: string): void;
   onPaywallPurchaseCompleted(paywallId: string, productId: string, transaction: Record<string, unknown>): void;
-  /** error type: Swift Error / Kotlin Throwable / Dart dynamic / TS unknown. */
+  /** error type: Swift Error / Kotlin Throwable / Dart Object / TS unknown. */
   onPaywallPurchaseFailed(paywallId: string, error: unknown): void;
   onPaywallRestoreStarted(paywallId: string): void;
   onPaywallRestoreCompleted(paywallId: string, restoredProductIds: string[]): void;
