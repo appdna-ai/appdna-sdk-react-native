@@ -29,9 +29,9 @@ AppDNA gives you a single drop-in SDK for the growth surfaces every subscription
 ## Installation
 
 ```bash
-npm install github:appdna-ai/appdna-sdk-react-native#v1.0.2
+npm install github:appdna-ai/appdna-sdk-react-native#v1.0.3
 # or
-yarn add github:appdna-ai/appdna-sdk-react-native#v1.0.2
+yarn add github:appdna-ai/appdna-sdk-react-native#v1.0.3
 ```
 
 For iOS, also run:
