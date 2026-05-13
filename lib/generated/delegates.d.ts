@@ -1,0 +1,62 @@
+/** Onboarding flow lifecycle observer. Observe-only — no return values, no async, no blocking. */
+export interface AppDNAOnboardingDelegate {
+    onOnboardingStarted(flowId: string): void;
+    onOnboardingStepChanged(flowId: string, stepId: string, stepIndex: number, totalSteps: number): void;
+    onOnboardingCompleted(flowId: string, responses: Record<string, unknown>): void;
+    onOnboardingDismissed(flowId: string, atStep: number): void;
+}
+/** 13 paywall lifecycle methods incl. purchase, restore lifecycle (started/completed/failed), post-purchase deep-link/next-step. */
+export interface AppDNAPaywallDelegate {
+    onPaywallPresented(paywallId: string): void;
+    onPaywallAction(paywallId: string, action: string): void;
+    onPaywallPurchaseStarted(paywallId: string, productId: string): void;
+    onPaywallPurchaseCompleted(paywallId: string, productId: string, transaction: Record<string, unknown>): void;
+    /** error type: Swift Error / Kotlin Throwable / Dart Object / TS unknown. */
+    onPaywallPurchaseFailed(paywallId: string, error: unknown): void;
+    onPaywallRestoreStarted(paywallId: string): void;
+    onPaywallRestoreCompleted(paywallId: string, restoredProductIds: string[]): void;
+    onPaywallRestoreFailed(paywallId: string, error: unknown): void;
+    onPaywallDismissed(paywallId: string): void;
+}
+/** Survey lifecycle observer. */
+export interface AppDNASurveyDelegate {
+    onSurveyPresented(surveyId: string): void;
+    onSurveySubmitted(surveyId: string, response: Record<string, unknown>): void;
+    onSurveyDismissed(surveyId: string): void;
+}
+/** In-app message lifecycle + show veto. */
+export interface AppDNAInAppMessageDelegate {
+    onMessagePresented(messageId: string): void;
+    onMessageAction(messageId: string, action: string): void;
+    onMessageDismissed(messageId: string): void;
+    /** Veto. Return false to suppress display. */
+    shouldShowMessage(messageId: string): boolean;
+}
+/** Push notification lifecycle. */
+export interface AppDNAPushDelegate {
+    onPushTokenRegistered(token: string): void;
+    onPushReceived(notification: Record<string, unknown>, inForeground: boolean): void;
+    onPushTapped(notification: Record<string, unknown>, actionId?: string): void;
+}
+/** Direct (non-paywall) billing observer. */
+export interface AppDNABillingDelegate {
+    onPurchaseCompleted(productId: string, transaction: Record<string, unknown>): void;
+    onPurchaseFailed(productId: string, error: unknown): void;
+    onEntitlementsChanged(entitlements: string[]): void;
+    onRestoreCompleted(restoredProductIds: string[]): void;
+}
+/** Deep link receiver with optional veto. */
+export interface AppDNADeepLinkDelegate {
+    /** Veto. Return false to suppress deep-link processing (e.g. defer until login). */
+    shouldOpen(url: string, params: Record<string, unknown>): boolean;
+    onDeepLinkReceived(url: string, params: Record<string, unknown>): void;
+}
+/** Server-driven screen lifecycle. 4 methods (last has Bool veto). */
+export interface AppDNAScreenDelegate {
+    onScreenPresented(screenId: string): void;
+    onScreenDismissed(screenId: string, result: Record<string, unknown>): void;
+    onFlowCompleted(flowId: string, result: Record<string, unknown>): void;
+    /** Veto. Return false to intercept the action and prevent default handling. */
+    onScreenAction(screenId: string, action: Record<string, unknown>): boolean;
+}
+//# sourceMappingURL=delegates.d.ts.map
