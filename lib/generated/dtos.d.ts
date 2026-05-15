@@ -1,0 +1,20 @@
+/** AppDNAEnvironment — runtime config the SDK negotiates at boot time. Phase 0.1 demo DTO; serves as the canonical small example for codegen mechanism proof. */
+export interface AppDNAEnvironment {
+    /** Base URL for the AppDNA REST API. */
+    api_base: string;
+    /** Base URL for SDK config (Firestore / proxy). */
+    config_base: string;
+    /** Base URL for the event-ingestion endpoint. */
+    events_base: string;
+    /** Semver version string of the SDK build. */
+    sdk_version: string;
+    /** True when SDK is initialized in dev mode. */
+    is_dev: boolean;
+    /** Optional gradual-rollout cap; 0-100, undefined = full rollout. */
+    rollout_percentage?: number;
+    /** Data-residency region the SDK is bound to. */
+    region: 'us' | 'eu' | 'apac';
+    /** Active server-resolved feature-flag keys for this device. */
+    feature_flags: string[];
+}
+//# sourceMappingURL=dtos.d.ts.map
