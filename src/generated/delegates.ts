@@ -2,14 +2,23 @@
 // Source: src/lib/sdk-delegates/index.ts
 // Generator: scripts/sdk-codegen/emit-delegates.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: b80b4bc4f9b6bd1a1a87d94624d18e050a2ce760
+// Last codegen commit: 9b514e667c4204268ef456415a60d2f7a7f59a9b
 
-/** Onboarding flow lifecycle observer. Observe-only — no return values, no async, no blocking. */
+/** Onboarding flow lifecycle observer + SPEC-083/419/421 async return-value hooks (routed via the sync_callbacks channel on Flutter/RN; native-hand-written on iOS, hand-written-Android per D11). */
 export interface AppDNAOnboardingDelegate {
   onOnboardingStarted(flowId: string): void;
   onOnboardingStepChanged(flowId: string, stepId: string, stepIndex: number, totalSteps: number): void;
   onOnboardingCompleted(flowId: string, responses: Record<string, unknown>): void;
   onOnboardingDismissed(flowId: string, atStep: number): void;
+  /** Async advance hook. Return .proceed (default) or a block/skip result. */
+  onBeforeStepAdvance?(flowId: string, fromStepId: string, stepIndex: number, stepType: string, responses: Record<string, unknown>, stepData: Record<string, unknown> | undefined): Promise<Record<string, unknown>>;
+  /** Async pre-render hook. Return null (default) or a config override. */
+  onBeforeStepRender?(flowId: string, stepId: string, stepIndex: number, stepType: string, responses: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  /** Async element-interaction hook. Return null (default) or a live-state result. */
+  onElementInteraction?(flowId: string, stepId: string, blockId: string, action: string, value: string | undefined, inputValues: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  /** Async permission pre-hook. Return .handledByHost(granted:) to short-circuit, or null to run the native flow. */
+  onPermissionRequest?(permissionType: string): Promise<Record<string, unknown> | null>;
+  onPermissionResult(flowId: string, stepId: string, permissionType: string, granted: boolean): void;
 }
 
 /** 13 paywall lifecycle methods incl. purchase, restore lifecycle (started/completed/failed), post-purchase deep-link/next-step. */
@@ -29,13 +38,19 @@ export interface AppDNAPaywallDelegate {
 /** Survey lifecycle observer. */
 export interface AppDNASurveyDelegate {
   onSurveyPresented(surveyId: string): void;
-  onSurveySubmitted(surveyId: string, response: Record<string, unknown>): void;
+  /** Survey completed. responses = list of SurveyResponse maps (native emits this; SPEC-070-C §3.9). */
+  onSurveyCompleted(surveyId: string, responses: Record<string, unknown>[]): void;
+  /** @deprecated Use onSurveyCompleted. DEPRECATED (1.0.5) — native never emitted this; use onSurveyCompleted. Non-breaking forwarding shim. */
+  onSurveySubmitted?(surveyId: string, response: Record<string, unknown>): void;
   onSurveyDismissed(surveyId: string): void;
 }
 
 /** In-app message lifecycle + show veto. */
 export interface AppDNAInAppMessageDelegate {
-  onMessagePresented(messageId: string): void;
+  /** Message shown with its trigger event (native emits this; SPEC-070-C §3.10). */
+  onMessageShown(messageId: string, trigger: string): void;
+  /** @deprecated Use onMessageShown. DEPRECATED (1.0.5) — native never emitted this; use onMessageShown. Non-breaking forwarding shim. */
+  onMessagePresented?(messageId: string): void;
   onMessageAction(messageId: string, action: string): void;
   onMessageDismissed(messageId: string): void;
   /** Veto. Return false to suppress display. */
@@ -46,7 +61,7 @@ export interface AppDNAInAppMessageDelegate {
 export interface AppDNAPushDelegate {
   onPushTokenRegistered(token: string): void;
   onPushReceived(notification: Record<string, unknown>, inForeground: boolean): void;
-  onPushTapped(notification: Record<string, unknown>, actionId?: string): void;
+  onPushTapped(notification: Record<string, unknown>, actionId: string | undefined): void;
 }
 
 /** Direct (non-paywall) billing observer. */
