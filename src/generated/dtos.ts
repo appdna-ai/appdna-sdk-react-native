@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-codegen/dto-registry.ts
 // Generator: scripts/sdk-codegen/emit-dtos.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 9b514e667c4204268ef456415a60d2f7a7f59a9b
+// Last codegen commit: 85473b173a44db0d2ed1488f176c3c76ceb5a27a
 
 /** AppDNAEnvironment — runtime config the SDK negotiates at boot time. Phase 0.1 demo DTO; serves as the canonical small example for codegen mechanism proof. */
 export interface AppDNAEnvironment {
@@ -22,4 +22,30 @@ export interface AppDNAEnvironment {
   region: 'us' | 'eu' | 'apac';
   /** Active server-resolved feature-flag keys for this device. */
   feature_flags: string[];
+}
+
+/** AppDNAPushAction — one structured notification action button on a push payload (SPEC-070-A push section; matches push_payload/action_buttons_parse fixture). */
+export interface AppDNAPushAction {
+  /** Stable action identifier — registers the notification button and echoes back on tap. */
+  id: string;
+  /** Button label shown in the notification tray (may be template-interpolated). */
+  label: string;
+  /** Action kind, e.g. "deep_link" | "dismiss" | "show_screen". */
+  action_type: string;
+  /** Action target (deep-link URL / screen id); absent for actions like "dismiss". */
+  action_value?: string;
+}
+
+/** AppDNAPushPayload — a delivered push notification the SDK surfaces to the host app (SPEC-070-A push section; matches push_payload/action_buttons_parse fixture). */
+export interface AppDNAPushPayload {
+  /** Server-assigned push campaign/message id; echoed on push_received / push_tapped events. */
+  push_id: string;
+  /** Notification title (post template interpolation). */
+  title: string;
+  /** Notification body text; optional for data-only / title-only pushes. */
+  body?: string;
+  /** Optional rich-media image URL for the expanded notification. */
+  image_url?: string;
+  /** Structured notification action buttons registered for this push. */
+  actions?: AppDNAPushAction[];
 }
