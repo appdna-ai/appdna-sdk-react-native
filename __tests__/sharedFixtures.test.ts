@@ -156,7 +156,10 @@ function loadRnFixtures(): Fixture[] {
   for (const filePath of walkFixtureFiles(root)) {
     const raw = fs.readFileSync(filePath, 'utf8');
     const fixture = JSON.parse(raw) as Fixture;
-    if (fixture.platforms.includes('rn')) {
+    // `render` (SPEC-419) and `events` (SPEC-428) fixtures carry no `action` — this behavioral runner
+    // requires one. The event pipeline is native-owned (ADR-001), so its guarantees are asserted by the
+    // iOS + Android EventPipeline runners; the RN thin wrapper only forwards track() to native.
+    if (fixture.platforms.includes('rn') && fixture.category !== 'render' && fixture.category !== 'events') {
       fixtures.push(fixture);
     }
   }
