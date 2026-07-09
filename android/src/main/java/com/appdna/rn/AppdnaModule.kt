@@ -278,7 +278,8 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
         return AppDNAOptions(
             flushInterval = if (map.hasKey("flushInterval")) map.getDouble("flushInterval").toLong() else 30L,
             batchSize = if (map.hasKey("batchSize")) map.getInt("batchSize") else 20,
-            configTTL = if (map.hasKey("configTTL")) map.getDouble("configTTL").toLong() else 300L,
+            // Never a literal: mirror the native default so this cannot drift again.
+            configTTL = if (map.hasKey("configTTL")) map.getDouble("configTTL").toLong() else AppDNAOptions().configTTL,
             logLevel = logLevel
         )
     }

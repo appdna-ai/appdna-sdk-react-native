@@ -66,7 +66,7 @@ TypeScript SDK for React Native. Thin native module wrapper around the native iO
 |--------|------|---------|-------------|
 | `flushInterval` | `number?` | 30 | Auto flush interval in seconds |
 | `batchSize` | `number?` | 20 | Events per flush batch |
-| `configTTL` | `number?` | 300 | Remote config cache TTL in seconds |
+| `configTTL` | `number?` | 3600 | Remote config cache TTL in seconds |
 | `logLevel` | `AppDNALogLevel?` | `'warning'` | Log verbosity (none/error/warning/info/debug) |
 | `billingProvider` | `AppDNABillingProvider?` | `'storeKit2'` | Billing provider (iOS only: storeKit2/revenueCat/none) |
 

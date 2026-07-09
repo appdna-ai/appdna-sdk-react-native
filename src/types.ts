@@ -30,7 +30,7 @@ export interface AppDNAOptions {
   flushInterval?: number;
   /** Number of events per flush batch. Default: 20. */
   batchSize?: number;
-  /** Remote config cache TTL in seconds. Default: 300 (5 min). */
+  /** Remote config cache TTL in seconds. Default: 3600 (1 hour), set natively. */
   configTTL?: number;
   /** Log verbosity. Default: 'warning'. */
   logLevel?: AppDNALogLevel;
