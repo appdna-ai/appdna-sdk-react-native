@@ -160,7 +160,9 @@ class AppdnaModule: RCTEventEmitter {
     // MARK: - Lifecycle
 
     @objc func shutdown(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        // iOS SDK does not expose a shutdown method; resolve immediately.
+        // `AppDNA.shutdown()` exists and flushes the event queue before tearing down.
+        // The old comment claiming otherwise was wrong.
+        AppDNA.shutdown()
         resolve(nil)
     }
 
@@ -263,7 +265,8 @@ class AppdnaModule: RCTEventEmitter {
         return AppDNAOptions(
             flushInterval: dict["flushInterval"] as? TimeInterval ?? 30,
             batchSize: dict["batchSize"] as? Int ?? 20,
-            configTTL: dict["configTTL"] as? TimeInterval ?? 300,
+            // Never a literal: mirror the native default so this cannot drift again.
+            configTTL: dict["configTTL"] as? TimeInterval ?? AppDNAOptions().configTTL,
             logLevel: logLevel,
             billingProvider: billingProvider
         )
