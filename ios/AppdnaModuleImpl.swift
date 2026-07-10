@@ -46,7 +46,10 @@ public final class AppdnaModuleImpl: NSObject {
     private var invoker: AppdnaVetoInvoker?
 
     private func emit(_ name: String, _ payload: [String: Any]) {
-        eventSink?.emitEventNamed(name, payload: payload as NSDictionary)
+        // The ObjC `AppdnaEventSink` protocol's `payload:` is `NSDictionary *`, which imports into
+        // Swift as `[AnyHashable: Any]`. A `[String: Any]` bridges to that automatically — casting to
+        // `NSDictionary` produces the wrong Swift type and does not convert.
+        eventSink?.emitEventNamed(name, payload: payload)
     }
 
     // MARK: - Lifecycle / core
