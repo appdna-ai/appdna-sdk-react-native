@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-spec.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: ea81e45d0e1549af59d43b0f74403741833808fd
+// Last codegen commit: 40dd33ff8d31da20dd890d5da60c7be0a63846be
 
 import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';

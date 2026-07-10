@@ -2,10 +2,11 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-ios-adapter.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: ea81e45d0e1549af59d43b0f74403741833808fd
+// Last codegen commit: 40dd33ff8d31da20dd890d5da60c7be0a63846be
 
 #import <React/RCTAssert.h>
 #import <React/RCTBridgeModule.h>
+#import <React/RCTInvalidating.h>
 #import <ReactCommon/RCTTurboModule.h>
 
 #import "AppdnaEventSink.h"
@@ -22,7 +23,7 @@
  * `NativeAppdnaModuleSpec`. Every method forwards to `AppdnaModuleImpl`, the Swift class that
  * actually talks to AppDNASDK. See the emitter's header comment for why the split is not optional.
  */
-@interface AppdnaModule : NativeAppdnaModuleSpecBase <NativeAppdnaModuleSpec, AppdnaEventSink>
+@interface AppdnaModule : NativeAppdnaModuleSpecBase <NativeAppdnaModuleSpec, AppdnaEventSink, RCTInvalidating>
 @end
 
 @implementation AppdnaModule {
@@ -50,10 +51,13 @@ RCT_EXPORT_MODULE()
   return NO;
 }
 
+// `invalidate` comes from React's `RCTInvalidating` protocol (declared above), NOT from
+// `NativeAppdnaModuleSpecBase` — the codegen base has no such selector, so calling
+// `[super invalidate]` fails to compile. React Native invokes this on module teardown when the
+// class conforms to `RCTInvalidating`; the Swift impl does the real cleanup (E6/E11).
 - (void)invalidate
 {
   [_impl invalidate];
-  [super invalidate];
 }
 
 #pragma mark - Events (native → JS)
