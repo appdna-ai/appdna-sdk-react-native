@@ -12,8 +12,13 @@
 appdna-demo-key*
 
 # Android signing + machine-local SDK paths.
+#
+# `android/app/debug.keystore` is EXEMPT and committed on purpose: it is Android's universally-known
+# public debug key, byte-identical on every machine, and it cannot sign a Play release. Every RN
+# template ships it. Without it `:app:packageDebug` fails. Release keystores stay ignored.
 *.keystore
 *.jks
+!android/app/debug.keystore
 **/local.properties
 **/key.properties
 
