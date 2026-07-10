@@ -112,6 +112,11 @@ dependencies {
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.robolectric:robolectric:4.11.1"
     testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3"
+    // AC-11: `parseOptions` is an instance method on AppdnaModule, whose super
+    // (NativeAppdnaModuleSpec → ReactContextBaseJavaModule) needs a ReactApplicationContext — abstract
+    // since RN 0.76. The init block never touches it, so a Mockito mock (constructed via Objenesis,
+    // no super ctor run) is a sufficient stand-in to reach parseOptions.
+    testImplementation "org.mockito:mockito-core:5.11.0"
 
     // SPEC-070-B D-v: pinned to the native this wrapper wraps. A bare Gradle version is a required
     // MINIMUM, not a lock — Gradle happily resolves something newer — so `check:version-lockstep`
