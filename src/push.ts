@@ -1,7 +1,4 @@
-import { NativeModules, NativeEventEmitter } from 'react-native';
-
-const { AppdnaModule } = NativeModules;
-const eventEmitter = new NativeEventEmitter(AppdnaModule);
+import { AppdnaModule, nativeEmitter } from './nativeModule';
 
 export interface PushPayload {
   push_id: string;
@@ -24,13 +21,13 @@ export class AppDNAPush {
 
   /** Listen for push received events. Returns unsubscribe function. */
   static onPushReceived(callback: (payload: PushPayload) => void): () => void {
-    const subscription = eventEmitter.addListener('onPushReceived', callback);
+    const subscription = nativeEmitter().addListener('onPushReceived', callback);
     return () => subscription.remove();
   }
 
   /** Listen for push tapped events. Returns unsubscribe function. */
   static onPushTapped(callback: (payload: PushPayload) => void): () => void {
-    const subscription = eventEmitter.addListener('onPushTapped', callback);
+    const subscription = nativeEmitter().addListener('onPushTapped', callback);
     return () => subscription.remove();
   }
 }

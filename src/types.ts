@@ -19,7 +19,14 @@ export interface PaywallContext {
   customData?: Record<string, unknown>;
 }
 
-export type AppDNAEnvironment = 'production' | 'staging';
+/**
+ * SPEC-070-B P1. The native enum is `production | sandbox` on BOTH platforms
+ * (`Configuration.swift:4`, `Configuration.kt:12`). `'staging'` named a case that has never existed;
+ * the iOS shim's `env == "staging" ? .staging : .production` could not compile, and a host passing
+ * `'staging'` silently got production. Which environment you are in is decided by the API-key prefix
+ * (`adn_test_` vs `adn_live_`) — this only selects the SDK's own environment tag.
+ */
+export type AppDNAEnvironment = 'production' | 'sandbox';
 
 export type AppDNALogLevel = 'none' | 'error' | 'warning' | 'info' | 'debug';
 

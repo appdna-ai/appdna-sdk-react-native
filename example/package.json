@@ -1,22 +1,32 @@
 {
   "name": "appdna-rn-example",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
-  "description": "Example app demonstrating all AppDNA SDK v0.3 capabilities.",
   "scripts": {
-    "start": "react-native start",
     "android": "react-native run-android",
-    "ios": "react-native run-ios"
+    "ios": "react-native run-ios",
+    "start": "react-native start"
   },
   "dependencies": {
-    "@appdna-ai/react-native-sdk": "file:..",
+    "@appdna-ai/react-native-sdk": "link:..",
     "react": "18.3.1",
     "react-native": "0.76.4"
   },
   "devDependencies": {
-    "@babel/core": "^7.24.0",
-    "@react-native/babel-preset": "^0.76.4",
-    "@types/react": "^18.2.0",
-    "typescript": "^5.0.0"
-  }
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "15.0.1",
+    "@react-native-community/cli-platform-android": "15.0.1",
+    "@react-native-community/cli-platform-ios": "15.0.1",
+    "@react-native/babel-preset": "0.76.4",
+    "@react-native/metro-config": "0.76.4",
+    "@react-native/typescript-config": "0.76.4",
+    "@types/react": "^18.2.6",
+    "typescript": "5.0.4"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "description": "Example host app for @appdna-ai/react-native-sdk — the only thing that compiles the wrapper Swift/Kotlin."
 }

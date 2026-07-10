@@ -1,6 +1,4 @@
-import { NativeModules, NativeEventEmitter } from 'react-native';
-
-const { AppdnaModule: AppdnaBillingModule } = NativeModules;
+import { AppdnaModule as AppdnaBillingModule, nativeEmitter } from './nativeModule';
 
 export type Entitlement = {
   productId: string;
@@ -25,7 +23,6 @@ export type ProductInfo = {
   offerToken?: string;
 };
 
-const eventEmitter = new NativeEventEmitter(AppdnaBillingModule);
 
 /**
  * Billing bridge for AppDNA in-app purchases.
@@ -75,7 +72,7 @@ export class AppDNABilling {
   static onEntitlementsChanged(
     callback: (entitlements: Entitlement[]) => void
   ): () => void {
-    const sub = eventEmitter.addListener('onEntitlementsChanged', callback);
+    const sub = nativeEmitter().addListener('onEntitlementsChanged', callback);
     return () => sub.remove();
   }
 
@@ -95,7 +92,8 @@ export class AppDNABilling {
     onEntitlementsChanged?(entitlements: Entitlement[]): void;
     onRestoreCompleted?(restoredProducts: string[]): void;
   }): void {
-    const emitter = new NativeEventEmitter(AppdnaBillingModule);
+    // Shared, memoised emitter — a per-call emitter is how a `setDelegate` leaks listeners.
+    const emitter = nativeEmitter();
     if (delegate.onPurchaseCompleted) {
       emitter.addListener('onPurchaseCompleted', (data: { productId: string; transaction: Record<string, unknown> }) =>
         delegate.onPurchaseCompleted!(data.productId, data.transaction ?? {}));

@@ -1,4 +1,4 @@
-import { NativeModules, NativeEventEmitter } from 'react-native';
+import { AppdnaModule, nativeEmitter } from './nativeModule';
 import type {
   WebEntitlement,
   DeferredDeepLink,
@@ -13,9 +13,6 @@ export { AppDNABilling } from './billing';
 export type { Entitlement, PurchaseResult, ProductInfo } from './billing';
 export { AppDNAPush } from './push';
 export type { PushPayload } from './push';
-
-const { AppdnaModule } = NativeModules;
-const eventEmitter = new NativeEventEmitter(AppdnaModule);
 
 // MARK: - Delegate / Listener Interfaces (SPEC-041)
 
@@ -214,7 +211,7 @@ export class AppDNA {
   static onWebEntitlementChanged(
     callback: (entitlement: WebEntitlement | null) => void
   ): () => void {
-    const subscription = eventEmitter.addListener(
+    const subscription = nativeEmitter().addListener(
       'onWebEntitlementChanged',
       callback
     );
@@ -242,11 +239,11 @@ export class AppDNA {
     getToken: (): Promise<string | null> => AppdnaModule.getPushToken(),
     /** Set a delegate to receive push notification callbacks. */
     setDelegate: (delegate: AppDNAPushDelegate): void => {
-      eventEmitter.addListener('onPushTokenRegistered', (data: { token: string }) =>
+      nativeEmitter().addListener('onPushTokenRegistered', (data: { token: string }) =>
         delegate.onPushTokenRegistered(data.token));
-      eventEmitter.addListener('onPushReceived', (data: { payload: Record<string, unknown>; inForeground: boolean }) =>
+      nativeEmitter().addListener('onPushReceived', (data: { payload: Record<string, unknown>; inForeground: boolean }) =>
         delegate.onPushReceived(data.payload, data.inForeground));
-      eventEmitter.addListener('onPushTapped', (data: { payload: Record<string, unknown>; actionId?: string }) =>
+      nativeEmitter().addListener('onPushTapped', (data: { payload: Record<string, unknown>; actionId?: string }) =>
         delegate.onPushTapped(data.payload, data.actionId));
     },
   };
@@ -257,13 +254,13 @@ export class AppDNA {
       AppdnaModule.presentOnboarding(flowId, context ?? null),
     /** Set a delegate to receive onboarding lifecycle callbacks. */
     setDelegate: (delegate: AppDNAOnboardingDelegate): void => {
-      eventEmitter.addListener('onOnboardingStarted', (data: { flowId: string }) =>
+      nativeEmitter().addListener('onOnboardingStarted', (data: { flowId: string }) =>
         delegate.onOnboardingStarted(data.flowId));
-      eventEmitter.addListener('onOnboardingStepChanged', (data: { flowId: string; stepId: string; stepIndex: number; totalSteps: number }) =>
+      nativeEmitter().addListener('onOnboardingStepChanged', (data: { flowId: string; stepId: string; stepIndex: number; totalSteps: number }) =>
         delegate.onOnboardingStepChanged(data.flowId, data.stepId, data.stepIndex, data.totalSteps));
-      eventEmitter.addListener('onOnboardingCompleted', (data: { flowId: string; responses: Record<string, unknown> }) =>
+      nativeEmitter().addListener('onOnboardingCompleted', (data: { flowId: string; responses: Record<string, unknown> }) =>
         delegate.onOnboardingCompleted(data.flowId, data.responses));
-      eventEmitter.addListener('onOnboardingDismissed', (data: { flowId: string; atStep: number }) =>
+      nativeEmitter().addListener('onOnboardingDismissed', (data: { flowId: string; atStep: number }) =>
         delegate.onOnboardingDismissed(data.flowId, data.atStep));
     },
   };
@@ -274,17 +271,17 @@ export class AppDNA {
       AppdnaModule.presentPaywall(paywallId, context ?? null),
     /** Set a delegate to receive paywall lifecycle callbacks. */
     setDelegate: (delegate: AppDNAPaywallDelegate): void => {
-      eventEmitter.addListener('onPaywallPresented', (data: { paywallId: string }) =>
+      nativeEmitter().addListener('onPaywallPresented', (data: { paywallId: string }) =>
         delegate.onPaywallPresented(data.paywallId));
-      eventEmitter.addListener('onPaywallAction', (data: { paywallId: string; action: string }) =>
+      nativeEmitter().addListener('onPaywallAction', (data: { paywallId: string; action: string }) =>
         delegate.onPaywallAction(data.paywallId, data.action));
-      eventEmitter.addListener('onPaywallPurchaseStarted', (data: { paywallId: string; productId: string }) =>
+      nativeEmitter().addListener('onPaywallPurchaseStarted', (data: { paywallId: string; productId: string }) =>
         delegate.onPaywallPurchaseStarted(data.paywallId, data.productId));
-      eventEmitter.addListener('onPaywallPurchaseCompleted', (data: { paywallId: string; productId: string; transaction: Record<string, unknown> }) =>
+      nativeEmitter().addListener('onPaywallPurchaseCompleted', (data: { paywallId: string; productId: string; transaction: Record<string, unknown> }) =>
         delegate.onPaywallPurchaseCompleted(data.paywallId, data.productId, data.transaction));
-      eventEmitter.addListener('onPaywallPurchaseFailed', (data: { paywallId: string; error: string }) =>
+      nativeEmitter().addListener('onPaywallPurchaseFailed', (data: { paywallId: string; error: string }) =>
         delegate.onPaywallPurchaseFailed(data.paywallId, data.error));
-      eventEmitter.addListener('onPaywallDismissed', (data: { paywallId: string }) =>
+      nativeEmitter().addListener('onPaywallDismissed', (data: { paywallId: string }) =>
         delegate.onPaywallDismissed(data.paywallId));
     },
   };
@@ -297,7 +294,7 @@ export class AppDNA {
     getAll: (): Promise<Record<string, unknown>> => AppdnaModule.getAllRemoteConfig(),
     /** Register a callback for remote config changes. Returns unsubscribe function. */
     onChanged: (callback: () => void): (() => void) => {
-      const sub = eventEmitter.addListener('onRemoteConfigChanged', callback);
+      const sub = nativeEmitter().addListener('onRemoteConfigChanged', callback);
       return () => sub.remove();
     },
   };
@@ -309,7 +306,7 @@ export class AppDNA {
     getVariant: (flag: string): Promise<unknown> => AppdnaModule.getFeatureVariant(flag),
     /** Register a callback for feature flag changes. Returns unsubscribe function. */
     onChanged: (callback: () => void): (() => void) => {
-      const sub = eventEmitter.addListener('onFeatureFlagsChanged', callback);
+      const sub = nativeEmitter().addListener('onFeatureFlagsChanged', callback);
       return () => sub.remove();
     },
   };
@@ -331,13 +328,13 @@ export class AppDNA {
       AppdnaModule.suppressMessages(suppress),
     /** Set a delegate to receive in-app message lifecycle callbacks. */
     setDelegate: (delegate: AppDNAInAppMessageDelegate): void => {
-      eventEmitter.addListener('onMessageShown', (data: { messageId: string; trigger: string }) =>
+      nativeEmitter().addListener('onMessageShown', (data: { messageId: string; trigger: string }) =>
         delegate.onMessageShown(data.messageId, data.trigger));
-      eventEmitter.addListener('onMessageAction', (data: { messageId: string; action: string; data?: Record<string, unknown> }) =>
+      nativeEmitter().addListener('onMessageAction', (data: { messageId: string; action: string; data?: Record<string, unknown> }) =>
         delegate.onMessageAction(data.messageId, data.action, data.data));
-      eventEmitter.addListener('onMessageDismissed', (data: { messageId: string }) =>
+      nativeEmitter().addListener('onMessageDismissed', (data: { messageId: string }) =>
         delegate.onMessageDismissed(data.messageId));
-      eventEmitter.addListener('shouldShowMessage', (data: { messageId: string }) => {
+      nativeEmitter().addListener('shouldShowMessage', (data: { messageId: string }) => {
         const result = delegate.shouldShowMessage(data.messageId);
         return result;
       });
@@ -349,11 +346,11 @@ export class AppDNA {
     present: (surveyId: string): Promise<void> => AppdnaModule.presentSurvey(surveyId),
     /** Set a delegate to receive survey lifecycle callbacks. */
     setDelegate: (delegate: AppDNASurveyDelegate): void => {
-      eventEmitter.addListener('onSurveyPresented', (data: { surveyId: string }) =>
+      nativeEmitter().addListener('onSurveyPresented', (data: { surveyId: string }) =>
         delegate.onSurveyPresented(data.surveyId));
-      eventEmitter.addListener('onSurveyCompleted', (data: { surveyId: string; responses: Array<Record<string, unknown>> }) =>
+      nativeEmitter().addListener('onSurveyCompleted', (data: { surveyId: string; responses: Array<Record<string, unknown>> }) =>
         delegate.onSurveyCompleted(data.surveyId, data.responses));
-      eventEmitter.addListener('onSurveyDismissed', (data: { surveyId: string }) =>
+      nativeEmitter().addListener('onSurveyDismissed', (data: { surveyId: string }) =>
         delegate.onSurveyDismissed(data.surveyId));
     },
   };
@@ -363,7 +360,7 @@ export class AppDNA {
     handleURL: (url: string): Promise<void> => AppdnaModule.handleDeepLink(url),
     /** Set a delegate to receive deep link callbacks. */
     setDelegate: (delegate: AppDNADeepLinkDelegate): void => {
-      eventEmitter.addListener('onDeepLinkReceived', (data: { url: string; params?: Record<string, string> }) =>
+      nativeEmitter().addListener('onDeepLinkReceived', (data: { url: string; params?: Record<string, string> }) =>
         delegate.onDeepLinkReceived(data.url, data.params ?? {}));
     },
   };
@@ -387,18 +384,18 @@ export class AppDNA {
       AppdnaModule.getEntitlements(),
     /** Listen for entitlement changes. Returns unsubscribe function. */
     onEntitlementsChanged: (callback: (entitlements: Entitlement[]) => void): (() => void) => {
-      const sub = eventEmitter.addListener('onEntitlementsChanged', callback);
+      const sub = nativeEmitter().addListener('onEntitlementsChanged', callback);
       return () => sub.remove();
     },
     /** Set a delegate to receive billing lifecycle callbacks. */
     setDelegate: (delegate: AppDNABillingDelegate): void => {
-      eventEmitter.addListener('onBillingPurchaseCompleted', (data: { productId: string; transaction: Record<string, unknown> }) =>
+      nativeEmitter().addListener('onBillingPurchaseCompleted', (data: { productId: string; transaction: Record<string, unknown> }) =>
         delegate.onPurchaseCompleted(data.productId, data.transaction));
-      eventEmitter.addListener('onBillingPurchaseFailed', (data: { productId: string; error: string }) =>
+      nativeEmitter().addListener('onBillingPurchaseFailed', (data: { productId: string; error: string }) =>
         delegate.onPurchaseFailed(data.productId, data.error));
-      eventEmitter.addListener('onBillingEntitlementsChanged', (data: { entitlements: Entitlement[] }) =>
+      nativeEmitter().addListener('onBillingEntitlementsChanged', (data: { entitlements: Entitlement[] }) =>
         delegate.onEntitlementsChanged(data.entitlements));
-      eventEmitter.addListener('onBillingRestoreCompleted', (data: { restoredProducts: string[] }) =>
+      nativeEmitter().addListener('onBillingRestoreCompleted', (data: { restoredProducts: string[] }) =>
         delegate.onRestoreCompleted(data.restoredProducts));
     },
   };

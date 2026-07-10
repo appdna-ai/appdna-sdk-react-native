@@ -31,7 +31,9 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun configure(apiKey: String, env: String, options: ReadableMap?, promise: Promise) {
-        val environment = if (env == "staging") Environment.SANDBOX else Environment.PRODUCTION
+        // SPEC-070-B P1: the wire value is `sandbox`, matching the native enum and iOS. `staging` was
+        // a name that existed on neither platform.
+        val environment = if (env == "sandbox") Environment.SANDBOX else Environment.PRODUCTION
         val opts = parseOptions(options)
         AppDNA.configure(reactApplicationContext, apiKey, environment, opts)
 
@@ -200,10 +202,18 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun purchase(productId: String, offerToken: String?, promise: Promise) {
+        // Play's purchase flow is Activity-bound. Without one there is nothing to launch from, and a
+        // silent no-op would look like a user who dismissed the sheet.
+        val activity = currentActivity ?: run {
+            promise.reject("NO_ACTIVITY", "purchase() requires a foreground Activity")
+            return
+        }
         scope.launch {
             try {
-                val result = AppDNA.billing.purchase(productId, offerToken)
-                promise.resolve(toWritableMap(result.toMap()))
+                // Real signature: `purchase(activity, productId, options: PurchaseOptions?)`.
+                val options = offerToken?.let { ai.appdna.sdk.billing.PurchaseOptions(offerToken = it) }
+                val result = AppDNA.billing.purchase(activity, productId, options)
+                promise.resolve(toWritableMap(AppdnaMappers.map(result)))
             } catch (e: Exception) {
                 promise.reject("PURCHASE_ERROR", e.message, e)
             }
@@ -214,9 +224,11 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
     fun restorePurchases(promise: Promise) {
         scope.launch {
             try {
-                val entitlements = AppDNA.billing.restorePurchases()
+                // Returns `List<String>` — restored product ids, NOT `List<Entitlement>`. `String`
+                // has no `toMap()`, so the old line could not compile.
+                val productIds: List<String> = AppDNA.billing.restorePurchases()
                 val array = Arguments.createArray()
-                entitlements.forEach { array.pushMap(toWritableMap(it.toMap())) }
+                productIds.forEach { array.pushString(it) }
                 promise.resolve(array)
             } catch (e: Exception) {
                 promise.reject("RESTORE_ERROR", e.message, e)
@@ -231,7 +243,7 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
             try {
                 val products = AppDNA.billing.getProducts(ids)
                 val array = Arguments.createArray()
-                products.forEach { array.pushMap(toWritableMap(it.toMap())) }
+                products.forEach { array.pushMap(toWritableMap(AppdnaMappers.map(it))) }
                 promise.resolve(array)
             } catch (e: Exception) {
                 promise.reject("PRODUCTS_ERROR", e.message, e)
@@ -251,13 +263,22 @@ class AppdnaModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * SPEC-070-B PN row 5: the listener instance is retained so `invalidate()` can remove it.
+     * Kotlin removal is REFERENCE IDENTITY — a lambda literal allocates a fresh object on every
+     * evaluation, so `removeEntitlementsChangedListener { … }` would silently remove nothing.
+     */
+    private var entitlementListener: ((List<ai.appdna.sdk.billing.Entitlement>) -> Unit)? = null
+
     @ReactMethod
     fun startEntitlementObserver(promise: Promise) {
-        AppDNA.billing.onEntitlementsChanged { entitlements ->
+        val listener: (List<ai.appdna.sdk.billing.Entitlement>) -> Unit = { entitlements ->
             val array = Arguments.createArray()
-            entitlements.forEach { array.pushMap(toWritableMap(it.toMap())) }
+            entitlements.forEach { array.pushMap(toWritableMap(AppdnaMappers.map(it))) }
             sendEvent("onEntitlementsChanged", array)
         }
+        entitlementListener = listener
+        AppDNA.billing.onEntitlementsChanged(listener)
         promise.resolve(null)
     }
 

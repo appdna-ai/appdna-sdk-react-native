@@ -1,8 +1,12 @@
 import Foundation
+import UIKit
 import AppDNASDK
 
 @objc(AppdnaModule)
 class AppdnaModule: RCTEventEmitter {
+
+    /// Token for the entitlements handler registered in `startEntitlementObserver` (PN row 3).
+    private var entitlementObserverToken: UUID?
 
     override init() {
         super.init()
@@ -19,7 +23,9 @@ class AppdnaModule: RCTEventEmitter {
     // MARK: - Core
 
     @objc func configure(_ apiKey: String, env: String, options: NSDictionary?, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        let environment: Environment = env == "staging" ? .staging : .production
+        // SPEC-070-B P1: the enum is `production | sandbox` (Configuration.swift:4). There has never
+        // been a `.staging` case — this line could not compile, and RN's CI never compiled it.
+        let environment: Environment = env == "sandbox" ? .sandbox : .production
         let opts = parseOptions(options as? [String: Any])
         AppDNA.configure(apiKey: apiKey, environment: environment, options: opts)
 
@@ -70,8 +76,10 @@ class AppdnaModule: RCTEventEmitter {
     }
 
     @objc func presentOnboarding(_ flowId: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        AppDNA.presentOnboarding(flowId: flowId)
-        resolve(nil)
+        // Returns false when no view controller is available to present from. Resolve with it rather
+        // than discarding it — a silent no-op is how "the SDK does nothing" gets reported as a bug.
+        let presented = AppDNA.presentOnboarding(flowId: flowId)
+        resolve(presented)
     }
 
     // MARK: - Remote Config & Experiments
@@ -172,11 +180,17 @@ class AppdnaModule: RCTEventEmitter {
 
     // MARK: - Billing
 
+    /// - Parameter offerToken: a Google Play concept. StoreKit has no equivalent, so iOS ignores it
+    ///   and says so rather than silently dropping a parameter the host believes is honored.
     @objc func purchase(_ productId: String, offerToken: NSString?, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+        if offerToken != nil {
+            NSLog("[AppDNA] offerToken is a Google Play Billing concept and is ignored on iOS.")
+        }
         Task {
             do {
-                let result = try await AppDNA.billing.purchase(productId: productId, offerToken: offerToken as String?)
-                resolve(result.toMap())
+                // Real signature: `purchase(_ productId: String, options: PurchaseOptions? = nil)`.
+                let result = try await AppDNA.billing.purchase(productId)
+                resolve(AppdnaMappers.map(result))
             } catch {
                 reject("PURCHASE_ERROR", error.localizedDescription, error)
             }
@@ -186,8 +200,10 @@ class AppdnaModule: RCTEventEmitter {
     @objc func restorePurchases(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
         Task {
             do {
-                let entitlements = try await AppDNA.billing.restorePurchases()
-                resolve(entitlements.map { $0.toMap() })
+                // Returns `[String]` — restored product ids, NOT `[Entitlement]`. `String` has no
+                // `toMap()`, so the old line could not compile.
+                let productIds: [String] = try await AppDNA.billing.restorePurchases()
+                resolve(productIds)
             } catch {
                 reject("RESTORE_ERROR", error.localizedDescription, error)
             }
@@ -198,8 +214,8 @@ class AppdnaModule: RCTEventEmitter {
         let ids = productIds.compactMap { $0 as? String }
         Task {
             do {
-                let products = try await AppDNA.billing.getProducts(productIds: ids)
-                resolve(products.map { $0.toMap() })
+                let products = try await AppDNA.billing.getProducts(ids)
+                resolve(products.map(AppdnaMappers.map))
             } catch {
                 reject("PRODUCTS_ERROR", error.localizedDescription, error)
             }
@@ -214,9 +230,11 @@ class AppdnaModule: RCTEventEmitter {
     }
 
     @objc func startEntitlementObserver(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-        AppDNA.billing.onEntitlementsChanged { [weak self] entitlements in
-            let maps = entitlements.map { $0.toMap() }
-            self?.sendEvent(withName: "onEntitlementsChanged", body: maps)
+        // SPEC-070-B PN row 3: `onEntitlementsChanged` now returns a removal token. P3 retains it so
+        // `invalidate()` can detach; a reload previously left N handlers on the process-global
+        // singleton and delivered every change N-fold.
+        entitlementObserverToken = AppDNA.billing.onEntitlementsChanged { [weak self] entitlements in
+            self?.sendEvent(withName: "onEntitlementsChanged", body: entitlements.map(AppdnaMappers.map))
         }
         resolve(nil)
     }

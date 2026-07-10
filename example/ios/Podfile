@@ -1,0 +1,54 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+# SPEC-070-B P1 / D-q1. The core pod requires iOS 16 (AppDNASDK.podspec:15); RN's
+# `min_ios_version_supported` is lower, and CocoaPods resolves the FLOOR, not the max.
+platform :ios, '16.0'
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'AppdnaExample' do
+  config = use_native_modules!
+
+  # SPEC-070-B P1 on-branch override, mirroring the Flutter example's APPDNA_IOS_SDK_PATH: build
+  # against a LOCAL iOS SDK so an UNPUBLISHED native (1.0.70) can be compile-verified before
+  # release. Unset in CI/publish → the registry pod named by the wrapper's podspec is used.
+  #
+  # Declared BEFORE use_native_modules!'s podspec dependency is resolved, so the local spec wins.
+  local_ios_sdk = ENV['APPDNA_IOS_SDK_PATH']
+  if local_ios_sdk && !local_ios_sdk.empty?
+    pod 'AppDNASDK', :path => local_ios_sdk
+  end
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # Every pod, not just ours: a transitive dep left at iOS 13 fails to link against a 16.0 app.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      end
+    end
+  end
+end

@@ -1,0 +1,35 @@
+buildscript {
+    ext {
+        buildToolsVersion = "35.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 35
+        targetSdkVersion = 34
+        ndkVersion = "26.1.10909125"
+        // The wrapper's android/build.gradle reads this via getExtOrDefault rather than pinning its
+        // own — a library must not force its Kotlin on the app that consumes it.
+        kotlinVersion = "1.9.24"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+
+// SPEC-070-B P1 on-branch override, mirroring the Flutter example. The gate lives HERE, in the app,
+// not in the wrapper's android/build.gradle: with RN 0.76's settings plugin the APP owns dependency
+// resolution, so `allprojects.repositories` declared inside a library is ignored. Learned the hard
+// way on the Flutter plugin, where the identical mistake silently resolved nothing.
+allprojects {
+    repositories {
+        if (System.getenv("APPDNA_ANDROID_SDK_PATH")) {
+            mavenLocal()   // listed FIRST so an unpublished local artifact wins
+        }
+    }
+}
