@@ -24,6 +24,9 @@ appdna-demo-key*
 
 # ── Build artefacts ─────────────────────────────────────────────────────────
 node_modules/
+# The packed SDK the example installs instead of a `file:..` symlink (see package.json). Generated at
+# build time by `npm pack` of the parent package; never committed.
+appdna-sdk-rn.tgz
 .DS_Store
 *.log
 *.swp

@@ -8,7 +8,7 @@
     "start": "react-native start"
   },
   "dependencies": {
-    "@appdna-ai/react-native-sdk": "file:..",
+    "@appdna-ai/react-native-sdk": "file:./appdna-sdk-rn.tgz",
     "react": "18.3.1",
     "react-native": "0.76.4"
   },
