@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "lib/typescript",
+    "rootDir": ".",
+    // No ambient node types in the published surface. `src/` is a thin wrapper (ADR-001): if it
+    // ever reaches for `fs`, `process`, or `__dirname`, this fails the build rather than shipping
+    // a facade that only works under a bundler that polyfills node.
+    "types": []
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "lib", "example", "__tests__"]
+}

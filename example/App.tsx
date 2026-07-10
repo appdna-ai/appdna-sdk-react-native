@@ -8,8 +8,8 @@ import {
   View,
   Alert,
 } from 'react-native';
-import { AppDNA } from '@appdna/react-native-sdk';
-import type { WebEntitlement, DeferredDeepLink } from '@appdna/react-native-sdk';
+import { AppDNA } from '@appdna-ai/react-native-sdk';
+import type { WebEntitlement, DeferredDeepLink } from '@appdna-ai/react-native-sdk';
 
 export default function App() {
   const [status, setStatus] = useState('Not configured');

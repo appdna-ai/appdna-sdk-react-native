@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    SPEC-070-B P0 / AC-38 (W7).
+
+    Apple MERGES the app's manifest with every linked pod's, so this file declares only what the
+    React Native wrapper itself does. The wrapper persists nothing, logs nothing, and collects
+    nothing of its own — verified: zero UserDefaults/Keychain/FileManager hits in ios/ and android/.
+    Every collected data type is declared by the core AppDNASDK pod's manifest, because that is
+    where the collection happens. Duplicating them here would misattribute them.
+
+    Ruling, so nobody has to re-derive it: NSPrivacyCollectedDataTypes is deliberately EMPTY, not
+    forgotten.
+  -->
+  <key>NSPrivacyTracking</key>
+  <false/>
+
+  <key>NSPrivacyTrackingDomains</key>
+  <array/>
+
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <!-- UserDefaults: the consent decision and the client_seq counter must be readable before
+           configure() wires the pipeline. CA92.1 = access limited to the app itself. -->
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>CA92.1</string>
+      </array>
+    </dict>
+    <dict>
+      <!-- File timestamps: the event queue's redelivery-horizon prune reads them. C617.1 = the
+           files are inside the app's own container. -->
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>C617.1</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

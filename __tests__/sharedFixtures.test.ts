@@ -49,29 +49,29 @@ interface CapturedCall {
   readonly args: readonly unknown[];
 }
 
-const capturedCalls: CapturedCall[] = [];
-const eventListeners: Map<string, ((data: unknown) => void)[]> = new Map();
+const mockCapturedCalls: CapturedCall[] = [];
+const mockEventListeners: Map<string, ((data: unknown) => void)[]> = new Map();
 
-const appdnaModuleMock = new Proxy(
+const mockAppdnaModule = new Proxy(
   {},
   {
     get(_target, methodName: string) {
       if (methodName === 'then') return undefined; // not a thenable
       return (...args: unknown[]) => {
-        capturedCalls.push({ method: methodName, args });
+        mockCapturedCalls.push({ method: methodName, args });
         return Promise.resolve(null);
       };
     },
   },
 ) as Record<string, (...args: unknown[]) => Promise<unknown>>;
 
-class FakeNativeEventEmitter {
+class MockNativeEventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(_module?: any) {}
   addListener(eventName: string, callback: (data: unknown) => void) {
-    const list = eventListeners.get(eventName) ?? [];
+    const list = mockEventListeners.get(eventName) ?? [];
     list.push(callback);
-    eventListeners.set(eventName, list);
+    mockEventListeners.set(eventName, list);
     return { remove: () => undefined };
   }
 }
@@ -79,8 +79,8 @@ class FakeNativeEventEmitter {
 jest.mock(
   'react-native',
   () => ({
-    NativeModules: { AppdnaModule: appdnaModuleMock },
-    NativeEventEmitter: FakeNativeEventEmitter,
+    NativeModules: { AppdnaModule: mockAppdnaModule },
+    NativeEventEmitter: MockNativeEventEmitter,
     Platform: { OS: 'ios', select: <T,>(spec: { default?: T; ios?: T; android?: T }) => spec.ios ?? spec.default },
   }),
   { virtual: true },
@@ -176,7 +176,12 @@ interface FixtureSkip {
 async function runFixture(fixture: Fixture): Promise<FixtureSkip | undefined> {
   switch (fixture.action.kind) {
     case 'track_event': {
-      const event = (fixture.action.event as string | undefined) ?? 'unknown';
+      // SPEC-070-B §18: the fixture key is `event_name`, not `event`. The driver read the wrong key
+      // and papered over it with `?? 'unknown'` — so it drove a track('unknown') and asserted
+      // against undefined. The suite never ran, so nobody saw it. A missing key is a broken
+      // fixture; say so instead of inventing an event name.
+      const event = fixture.action.event_name as string | undefined;
+      if (!event) throw new Error(`[${fixture.id}] track_event fixture has no 'event_name'`);
       const properties = fixture.action.properties as
         | Record<string, unknown>
         | undefined;
@@ -184,7 +189,8 @@ async function runFixture(fixture: Fixture): Promise<FixtureSkip | undefined> {
       return undefined;
     }
     case 'identify': {
-      const userId = (fixture.action.userId as string | undefined) ?? '';
+      const userId = fixture.action.userId as string | undefined;
+      if (!userId) throw new Error(`[${fixture.id}] identify fixture has no 'userId'`);
       const traits = fixture.action.traits as
         | Record<string, unknown>
         | undefined;
@@ -203,17 +209,17 @@ function assertBridgeContract(fixture: Fixture): void {
   const id = fixture.id;
   switch (fixture.action.kind) {
     case 'track_event': {
-      expect(capturedCalls).toHaveLength(1);
-      const c = capturedCalls[0]!;
+      expect(mockCapturedCalls).toHaveLength(1);
+      const c = mockCapturedCalls[0]!;
       expect(c.method).toBe('track');
-      expect(c.args[0]).toBe(fixture.action.event);
+      expect(c.args[0]).toBe(fixture.action.event_name);
       // SDK passes `properties ?? null` when undefined (per src/index.ts).
       expect(c.args[1]).toEqual(fixture.action.properties ?? null);
       break;
     }
     case 'identify': {
-      expect(capturedCalls).toHaveLength(1);
-      const c = capturedCalls[0]!;
+      expect(mockCapturedCalls).toHaveLength(1);
+      const c = mockCapturedCalls[0]!;
       expect(c.method).toBe('identify');
       expect(c.args[0]).toBe(fixture.action.userId);
       expect(c.args[1]).toEqual(fixture.action.traits ?? null);
@@ -230,8 +236,8 @@ const fixtures = loadRnFixtures();
 
 describe('SharedFixtures (React Native bridge contract)', () => {
   beforeEach(() => {
-    capturedCalls.length = 0;
-    eventListeners.clear();
+    mockCapturedCalls.length = 0;
+    mockEventListeners.clear();
   });
 
   it('fixtures directory contains at least one rn-applicable fixture', () => {

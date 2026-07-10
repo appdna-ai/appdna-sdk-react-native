@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPEC-070-B P0 / D-q1. Deliberately empty of permissions and application attributes.
+
+  The SDK's own library manifest (ai.appdna:sdk-android) declares everything the runtime needs and
+  auto-merges into the host. A wrapper that ALSO declared application-level attributes
+  (allowBackup, fullBackupContent, dataExtractionRules) would break manifest-merge for any host
+  that declares its own — which is exactly why the Expo config plugin needs no Android mod.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
