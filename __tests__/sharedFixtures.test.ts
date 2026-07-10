@@ -80,17 +80,19 @@ const mockAppdnaModule = new Proxy(
   },
 ) as Record<string, (...args: unknown[]) => Promise<unknown>>;
 
-jest.mock(
-  'react-native',
-  () => ({
-    TurboModuleRegistry: {
-      get: () => mockAppdnaModule,
-      getEnforcing: () => mockAppdnaModule,
-    },
-    Platform: { OS: 'ios', select: <T,>(spec: { default?: T; ios?: T; android?: T }) => spec.ios ?? spec.default },
-  }),
-  { virtual: true },
-);
+// NO `{ virtual: true }`: react-native is a REAL module (the `react-native` preset provides it).
+// Marking a real module's mock virtual corrupts jest's per-worker mock registry — the NEXT test file
+// in the same worker then finds react-native "already handled" and its own `jest.mock('react-native')`
+// silently no-ops, so it resolves the REAL module whose `TurboModuleRegistry.get('AppdnaModule')`
+// returns null → every suite after this one failed with "native module is not available", ordered by
+// jest's sequencer. That was the whole flaky-suite bug.
+jest.mock('react-native', () => ({
+  TurboModuleRegistry: {
+    get: () => mockAppdnaModule,
+    getEnforcing: () => mockAppdnaModule,
+  },
+  Platform: { OS: 'ios', select: <T,>(spec: { default?: T; ios?: T; android?: T }) => spec.ios ?? spec.default },
+}));
 
 // Import AFTER mock is registered.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
