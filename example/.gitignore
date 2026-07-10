@@ -58,3 +58,6 @@ android/app/release
 # RN codegen output
 android/app/build/generated/
 ios/build/generated/
+
+# npm lockfile regenerates per install-links build; not tracked for a library example.
+package-lock.json
