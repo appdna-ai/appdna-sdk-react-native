@@ -50,8 +50,12 @@ target 'AppdnaExample' do
   # `app.plugin.js` sets `ios.useFrameworks: 'dynamic'` to match — the bare Podfile and the Expo
   # plugin must not disagree about linkage, or the example builds a target no Expo consumer can
   # reproduce.
+  # Dynamic frameworks. Each pod builds as a framework, which defines a module — so `FirebaseFirestore`
+  # can import `FirebaseFirestoreInternal` with no help, and `use_modular_headers!` (needed only under
+  # static LIBRARIES) is not just unnecessary here but actively expensive: it makes CocoaPods
+  # synthesise a module map for all ~50 pods during project generation. This matches the Flutter
+  # example, which pulls the same Firebase graph and installs in minutes.
   use_frameworks!
-  use_modular_headers!
 
   use_react_native!(
     :path => config[:reactNativePath],
