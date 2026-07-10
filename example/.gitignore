@@ -1,0 +1,52 @@
+# SPEC-070-B AC-25(a). This example ships in TWO public places: the npm tarball (governed by the
+# package's `files` allowlist) and the force-pushed public git mirror (`git subtree split`, which
+# carries the entire committed history regardless of `files`). Nothing secret may ever be committed
+# here — inject at build time via launch args / env, exactly as the Flutter example does.
+
+# ── Demo-tenant secrets. NEVER commit. ──────────────────────────────────────
+**/GoogleService-Info-AppDNA.plist
+**/google-services-appdna.json
+**/appdna-config.json
+.env
+*.env
+appdna-demo-key*
+
+# Android signing + machine-local SDK paths.
+*.keystore
+*.jks
+**/local.properties
+**/key.properties
+
+# ── Build artefacts ─────────────────────────────────────────────────────────
+node_modules/
+.DS_Store
+*.log
+*.swp
+
+# Metro / Babel
+.metro-health-check*
+.expo/
+dist/
+
+# iOS
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/.xcode.env.local
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+.swiftpm/
+
+# Android
+android/build/
+android/app/build/
+android/.gradle/
+android/.idea/
+android/app/debug
+android/app/release
+*.iml
+*.hprof
+
+# RN codegen output
+android/app/build/generated/
+ios/build/generated/
