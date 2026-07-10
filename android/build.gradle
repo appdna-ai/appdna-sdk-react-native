@@ -76,9 +76,25 @@ repositories {
     mavenCentral()
 }
 
+android.testOptions {
+    unitTests {
+        // `AppdnaBridge` speaks org.json, and `AppdnaVetoDecoder` decodes what it produces. The stock
+        // android.jar stubs throw on every method, so without this the tests would fail for a reason
+        // that has nothing to do with the code under test.
+        returnDefaultValues = false
+        includeAndroidResources = true
+    }
+}
+
 dependencies {
     implementation "com.facebook.react:react-android"
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+
+    // SPEC-070-B AC-11/AC-33: `parseOptions`, the JSON bridge and the veto decoder are native-only.
+    // A jest test cannot see a Kotlin `?: 3600`, and neither can a Dart one.
+    testImplementation "junit:junit:4.13.2"
+    testImplementation "org.robolectric:robolectric:4.11.1"
+    testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3"
 
     // SPEC-070-B D-v: pinned to the native this wrapper wraps. A bare Gradle version is a required
     // MINIMUM, not a lock — Gradle happily resolves something newer — so `check:version-lockstep`
