@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-spec.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: ea9025195691bc32855a4433ba91a07d37a705c5
+// Last codegen commit: ea81e45d0e1549af59d43b0f74403741833808fd
 
 import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
@@ -190,6 +190,9 @@ export interface Spec extends TurboModule {
 
   readonly onOnboardingDismissed: EventEmitter<UnsafeObject>;
 
+  /** Observe-only. Fires after an onboarding permission resolves, however it resolved. */
+  readonly onPermissionResult: EventEmitter<UnsafeObject>;
+
   readonly onPaywallPresented: EventEmitter<UnsafeObject>;
 
   readonly onPaywallAction: EventEmitter<UnsafeObject>;
@@ -201,6 +204,19 @@ export interface Spec extends TurboModule {
   readonly onPaywallPurchaseFailed: EventEmitter<UnsafeObject>;
 
   readonly onPaywallDismissed: EventEmitter<UnsafeObject>;
+
+  readonly onPaywallRestoreStarted: EventEmitter<UnsafeObject>;
+
+  /** Payload is `{paywallId, restoredProductIds}`. */
+  readonly onPaywallRestoreCompleted: EventEmitter<UnsafeObject>;
+
+  readonly onPaywallRestoreFailed: EventEmitter<UnsafeObject>;
+
+  /** The SDK asks the host to open a URL after a purchase. */
+  readonly onPostPurchaseDeepLink: EventEmitter<UnsafeObject>;
+
+  /** The SDK asks the host to continue to the next onboarding step. */
+  readonly onPostPurchaseNextStep: EventEmitter<UnsafeObject>;
 
   readonly onPurchaseCompleted: EventEmitter<UnsafeObject>;
 
@@ -238,6 +254,12 @@ export interface Spec extends TurboModule {
   readonly onDeepLinkReceived: EventEmitter<UnsafeObject>;
 
   readonly onWebEntitlementChanged: EventEmitter<UnsafeObject>;
+
+  /** SPEC-404: the backend locked this SDK key. Payload `{reason, lockedAt}`. */
+  readonly onSdkRuntimeLocked: EventEmitter<UnsafeObject>;
+
+  /** SPEC-404: the lock cleared. */
+  readonly onSdkRuntimeUnlocked: EventEmitter<UnsafeObject>;
 
   /**
    * A native→JS veto request: `{callbackId, hook, argsJson}`. JS answers with

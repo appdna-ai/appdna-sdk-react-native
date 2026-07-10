@@ -7,6 +7,7 @@ import ai.appdna.sdk.Environment
 import ai.appdna.sdk.LogLevel
 import ai.appdna.sdk.paywalls.PaywallContext
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
@@ -50,6 +51,13 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
      */
     private var entitlementListener: ((List<ai.appdna.sdk.billing.Entitlement>) -> Unit)? = null
 
+    /**
+     * P3 — the eight veto hooks and every observe callback are routed by these. Built in
+     * [configure], because `vetoTimeout` is a configure option and a forwarder registered before it
+     * would use the wrong timer.
+     */
+    private var invoker: AppdnaVetoInvoker? = null
+
     companion object {
         const val NAME = "AppdnaModule"
 
@@ -69,7 +77,9 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
             // The wire value is `sandbox`, matching the native enum and iOS. `staging` named a case
             // that has never existed on either platform.
             val environment = if (env == "sandbox") Environment.SANDBOX else Environment.PRODUCTION
-            AppDNA.configure(reactContext, apiKey, environment, parseOptions(options))
+            val parsed = parseOptions(options)
+            AppDNA.configure(reactContext, apiKey, environment, parsed)
+            registerDelegates(parsed.vetoTimeout)
             promise.resolve(null)
         } catch (e: Throwable) {
             promise.reject("CONFIGURE_ERROR", e.message, e)
@@ -375,6 +385,109 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         AppdnaHostCallbacks.respond(callbackId, resultJson)
     }
 
+    // ── Delegates (P3) ───────────────────────────────────────────────────────
+
+    /**
+     * Attach every forwarder to the native SDK.
+     *
+     * All of them, unconditionally, at `configure` — not lazily when JS subscribes. A TurboModule
+     * emitter property gives native no subscribe signal, so there is nothing to be lazy about, and
+     * emitting into zero listeners costs a `WritableMap` that is immediately dropped.
+     *
+     * The three synchronous vetoes (`shouldShowMessage`, `shouldOpen`, `onScreenAction`) cannot await
+     * a bridge round trip, so each is registered on the SDK's parallel **async seam**, which
+     * `MessageManager` / `DeepLinksModule` / `ScreenManager` consult in addition to the sync delegate
+     * method. Both can suppress; only the async one can wait.
+     *
+     * @param vetoTimeoutSeconds from `AppDNAOptions.vetoTimeout` — never a literal, per E7.
+     */
+    private fun registerDelegates(vetoTimeoutSeconds: Long) {
+        val emitter = AppdnaEventEmitter { event, payload -> emitEventNamed(event, payload) }
+        val veto = AppdnaVetoInvoker(vetoTimeoutSeconds * 1000L) { payload ->
+            emitEventNamed("onHostCallback", payload)
+        }
+        invoker = veto
+
+        AppDNA.onboarding.setDelegate(OnboardingForwarder(emitter, veto))
+        AppDNA.paywall.setDelegate(PaywallForwarder(emitter, veto) { block -> scope.launch { block() } })
+        AppDNA.surveys.setDelegate(SurveyForwarder(emitter))
+        AppDNA.inAppMessages.setDelegate(InAppMessageForwarder(emitter))
+        AppDNA.push.setDelegate(PushForwarder(emitter))
+        AppDNA.billing.setDelegate(BillingForwarder(emitter))
+        AppDNA.deepLinks.setDelegate(DeepLinkForwarder(emitter))
+        AppDNA.setInitDelegate(InitForwarder(emitter))
+
+        // 🔴 `shouldShowMessage` defaults to ALLOW on timeout; `onPromoCodeSubmit` to REJECT. A
+        // uniform default here is how a paywall silently starts accepting unvalidated promo codes.
+        AppDNA.inAppMessages.setAsyncShouldShowMessage { messageId ->
+            veto.invoke("shouldShowMessage", mapOf("messageId" to messageId)) as? Boolean ?: true
+        }
+        AppDNA.deepLinks.asyncShouldOpen = { url, params ->
+            veto.invoke("shouldOpen", mapOf("url" to url, "params" to params)) as? Boolean ?: true
+        }
+        AppDNA.asyncOnScreenAction = { screenId, action ->
+            veto.invoke(
+                "onScreenAction",
+                mapOf("screenId" to screenId, "action" to action),
+            ) as? Boolean ?: true
+        }
+    }
+
+    /**
+     * Fan an event out to its generated emitter.
+     *
+     * An event with no emitter is spec drift, not a runtime condition — the whole point of the
+     * codegen'd spec is that the two sets cannot disagree. `check:rn-facade-parity` (P6) asserts this
+     * `when` covers `SDK_EVENTS` exactly, in both directions.
+     */
+    private fun emitEventNamed(name: String, payload: Map<String, Any?>) {
+        emitEventNamed(name, AppdnaBridge.toWritableMap(payload))
+    }
+
+    private fun emitEventNamed(name: String, payload: WritableMap) {
+        when (name) {
+            "onInitDegraded" -> emitOnInitDegraded(payload)
+            "onRemoteConfigChanged" -> emitOnRemoteConfigChanged(payload)
+            "onFeatureFlagsChanged" -> emitOnFeatureFlagsChanged(payload)
+            "onOnboardingStarted" -> emitOnOnboardingStarted(payload)
+            "onOnboardingStepChanged" -> emitOnOnboardingStepChanged(payload)
+            "onOnboardingCompleted" -> emitOnOnboardingCompleted(payload)
+            "onOnboardingDismissed" -> emitOnOnboardingDismissed(payload)
+            "onPermissionResult" -> emitOnPermissionResult(payload)
+            "onPaywallPresented" -> emitOnPaywallPresented(payload)
+            "onPaywallAction" -> emitOnPaywallAction(payload)
+            "onPaywallPurchaseStarted" -> emitOnPaywallPurchaseStarted(payload)
+            "onPaywallPurchaseCompleted" -> emitOnPaywallPurchaseCompleted(payload)
+            "onPaywallPurchaseFailed" -> emitOnPaywallPurchaseFailed(payload)
+            "onPaywallDismissed" -> emitOnPaywallDismissed(payload)
+            "onPaywallRestoreStarted" -> emitOnPaywallRestoreStarted(payload)
+            "onPaywallRestoreCompleted" -> emitOnPaywallRestoreCompleted(payload)
+            "onPaywallRestoreFailed" -> emitOnPaywallRestoreFailed(payload)
+            "onPostPurchaseDeepLink" -> emitOnPostPurchaseDeepLink(payload)
+            "onPostPurchaseNextStep" -> emitOnPostPurchaseNextStep(payload)
+            "onPurchaseCompleted" -> emitOnPurchaseCompleted(payload)
+            "onPurchaseFailed" -> emitOnPurchaseFailed(payload)
+            "onRestoreCompleted" -> emitOnRestoreCompleted(payload)
+            "onEntitlementsChanged" -> emitOnEntitlementsChanged(payload)
+            "onBillingUnavailable" -> emitOnBillingUnavailable(payload)
+            "onSurveyPresented" -> emitOnSurveyPresented(payload)
+            "onSurveyCompleted" -> emitOnSurveyCompleted(payload)
+            "onSurveyDismissed" -> emitOnSurveyDismissed(payload)
+            "onMessageShown" -> emitOnMessageShown(payload)
+            "onMessageAction" -> emitOnMessageAction(payload)
+            "onMessageDismissed" -> emitOnMessageDismissed(payload)
+            "onPushTokenRegistered" -> emitOnPushTokenRegistered(payload)
+            "onPushReceived" -> emitOnPushReceived(payload)
+            "onPushTapped" -> emitOnPushTapped(payload)
+            "onDeepLinkReceived" -> emitOnDeepLinkReceived(payload)
+            "onWebEntitlementChanged" -> emitOnWebEntitlementChanged(payload)
+            "onSdkRuntimeLocked" -> emitOnSdkRuntimeLocked(payload)
+            "onSdkRuntimeUnlocked" -> emitOnSdkRuntimeUnlocked(payload)
+            "onHostCallback" -> emitOnHostCallback(payload)
+            else -> throw IllegalStateException("AppDNA: no TurboModule emitter for event '$name'")
+        }
+    }
+
     // ── Teardown (E6 / E11) ──────────────────────────────────────────────────
 
     /**
@@ -387,6 +500,21 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
     override fun invalidate() {
         entitlementListener?.let { AppDNA.billing.removeEntitlementsChangedListener(it) }
         entitlementListener = null
+
+        // Every forwarder captures this bridge-scoped module. Leaving them attached to the
+        // process-global singleton across a reload is what delivers each event N-fold.
+        AppDNA.onboarding.setDelegate(null)
+        AppDNA.paywall.setDelegate(null)
+        AppDNA.surveys.setDelegate(null)
+        AppDNA.inAppMessages.setDelegate(null)
+        AppDNA.push.setDelegate(null)
+        AppDNA.billing.setDelegate(null)
+        AppDNA.deepLinks.setDelegate(null)
+        AppDNA.setInitDelegate(null)
+        AppDNA.inAppMessages.setAsyncShouldShowMessage(null)
+        AppDNA.deepLinks.asyncShouldOpen = null
+        AppDNA.asyncOnScreenAction = null
+        invoker = null
         // E6: drain the pending veto map, rejecting each — a JS side that no longer exists will
         // never answer, and native would otherwise await forever.
         AppdnaHostCallbacks.invalidateAll()

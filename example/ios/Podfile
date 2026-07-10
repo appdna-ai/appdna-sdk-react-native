@@ -29,6 +29,20 @@ target 'AppdnaExample' do
     pod 'AppDNASDK', :path => local_ios_sdk
   end
 
+  # SPEC-070-B P1 / D-q1 — Firebase's LINKAGE, discovered by building rather than by reading.
+  #
+  # AppDNASDK depends on FirebaseFirestore. RN links pods as static libraries by default, and
+  # CocoaPods then refuses:
+  #
+  #   The Swift pod `FirebaseFirestore` depends upon `FirebaseFirestoreInternal`, which does not
+  #   define modules. To opt into those targets generating module maps … set `use_modular_headers!`
+  #
+  # `use_modular_headers!` is CocoaPods' own remedy: it generates module maps for the ObjC pods so
+  # the Swift ones can import them while still linking statically. The alternative,
+  # `use_frameworks! :linkage => :static`, is what the Expo config plugin sets — Expo owns its
+  # Podfile, and `ios.useFrameworks: 'static'` is the only lever it exposes.
+  use_modular_headers!
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.

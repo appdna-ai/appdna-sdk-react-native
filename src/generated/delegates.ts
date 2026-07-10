@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/index.ts
 // Generator: scripts/sdk-codegen/emit-delegates.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: ea9025195691bc32855a4433ba91a07d37a705c5
+// Last codegen commit: ea81e45d0e1549af59d43b0f74403741833808fd
 
 /** Onboarding flow lifecycle observer + SPEC-083/419/421 async return-value hooks (routed via the sync_callbacks channel on Flutter/RN; native-hand-written on iOS, hand-written-Android per D11). */
 export interface AppDNAOnboardingDelegate {
@@ -61,7 +61,7 @@ export interface AppDNAInAppMessageDelegate {
   onMessageAction(messageId: string, action: string, data: Record<string, unknown> | undefined): void;
   onMessageDismissed(messageId: string): void;
   /** Veto. Return false to suppress display. */
-  shouldShowMessage(messageId: string): boolean;
+  shouldShowMessage(messageId: string): boolean | Promise<boolean>;
 }
 
 /** Push notification lifecycle. */
@@ -85,7 +85,7 @@ export interface AppDNABillingDelegate {
 /** Deep link receiver with optional veto. */
 export interface AppDNADeepLinkDelegate {
   /** Veto. Return false to suppress deep-link processing (e.g. defer until login). */
-  shouldOpen(url: string, params: Record<string, unknown>): boolean;
+  shouldOpen(url: string, params: Record<string, unknown>): boolean | Promise<boolean>;
   onDeepLinkReceived(url: string, params: Record<string, unknown>): void;
 }
 
@@ -95,7 +95,7 @@ export interface AppDNAScreenDelegate {
   onScreenDismissed(screenId: string, result: Record<string, unknown>): void;
   onFlowCompleted(flowId: string, result: Record<string, unknown>): void;
   /** Veto. Return false to intercept the action and prevent default handling. */
-  onScreenAction(screenId: string, action: Record<string, unknown>): boolean;
+  onScreenAction(screenId: string, action: Record<string, unknown>): boolean | Promise<boolean>;
 }
 
 /** SPEC-404 — backend-driven SDK lock-state observer. Fires once per state transition (idle <-> locked). Hosts use this to surface a custom "service unavailable" banner and trigger a one-shot event-queue retry on unlock. */

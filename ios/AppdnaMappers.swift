@@ -69,4 +69,62 @@ enum AppdnaMappers {
         // `currencyCode` is Android-only: iOS's ProductInfo does not expose it (N-row §4).
         return out
     }
+
+    /// The push payload the SDK parsed. `action` is flattened to `action_type` / `action_value` so
+    /// the facade's `PushPayload` type matches the snake_case shape the console publishes and the
+    /// other three SDKs already expose.
+    static func map(_ payload: PushPayload) -> [String: Any] {
+        var out: [String: Any] = [
+            "push_id": payload.pushId,
+            "title": payload.title,
+            "body": payload.body,
+        ]
+        if let imageUrl = payload.imageUrl { out["image_url"] = imageUrl }
+        if let data = payload.data { out["data"] = data }
+        if let action = payload.action {
+            out["action_type"] = action.type
+            out["action_value"] = action.value
+        }
+        return out
+    }
+
+    /// `{questionId, answer}`. `answer` is `Any` natively — a string, a number, a bool or a list —
+    /// and crosses as-is; a type the bridge cannot represent is a mapper bug, not a runtime state.
+    static func map(_ response: SurveyResponse) -> [String: Any] {
+        ["questionId": response.questionId, "answer": response.answer]
+    }
+
+    /**
+     * `SectionAction` → a `{type, …}` map, byte-identical to Android's `SectionAction.toActionMap`.
+     * A host that writes an `onScreenAction` veto reads the same `action.type` on both platforms.
+     *
+     * ⚠ Asymmetry, recorded rather than hidden: iOS's `AppDNA.asyncOnScreenAction` hands the wrapper a
+     * `SectionAction`, Android's hands it an already-encoded `Map`. The SDKs disagree; the wire does
+     * not.
+     */
+    static func map(_ action: SectionAction) -> [String: Any] {
+        switch action {
+        case .next: return ["type": "next"]
+        case .back: return ["type": "back"]
+        case .dismiss: return ["type": "dismiss"]
+        case .navigate(let screenId): return ["type": "navigate", "screenId": screenId]
+        case .openURL(let url): return ["type": "openURL", "url": url]
+        case .openWebview(let url): return ["type": "openWebview", "url": url]
+        case .openAppSettings: return ["type": "openAppSettings"]
+        case .share(let text): return ["type": "share", "text": text]
+        case .deepLink(let url): return ["type": "deepLink", "url": url]
+        case .showPaywall(let id): return compact(["type": "showPaywall", "id": id])
+        case .showSurvey(let id): return compact(["type": "showSurvey", "id": id])
+        case .showScreen(let id): return ["type": "showScreen", "id": id]
+        case .submitForm(let data): return ["type": "submitForm", "data": data]
+        case .track(let event, let properties): return compact(["type": "track", "event": event, "properties": properties])
+        case .haptic(let type): return ["type": "haptic", "hapticType": type]
+        case .custom(let type, let value): return compact(["type": "custom", "customType": type, "value": value])
+        }
+    }
+
+    /// Drop nil values rather than bridging `NSNull`: an absent key is what the other platform sends.
+    private static func compact(_ dict: [String: Any?]) -> [String: Any] {
+        dict.compactMapValues { $0 }
+    }
 }

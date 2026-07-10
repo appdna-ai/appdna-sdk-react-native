@@ -1,18 +1,26 @@
-import { NativeModules, NativeEventEmitter } from 'react-native';
+import { TurboModuleRegistry, type EventSubscription } from 'react-native';
+import type { Spec } from './specs/NativeAppdnaModule';
 
 /**
- * SPEC-070-B D-q2 / §20 — the single place the native module is resolved.
+ * SPEC-070-B D-q2 / D-c / §20 — the single place the native module is resolved.
+ *
+ * ## Why `TurboModuleRegistry`, and why no `NativeEventEmitter`
+ *
+ * D-c makes this package New Architecture only. Under the New Architecture the native side emits
+ * through the codegen'd `emitOnX:` methods on `NativeAppdnaModuleSpecBase` (iOS) /
+ * `NativeAppdnaModuleSpec` (Android), and JS receives through the `EventEmitter<T>` **properties**
+ * on the spec — `AppdnaModule.onPaywallDismissed(listener)`. That path never touches
+ * `RCTEventEmitter`, so `new NativeEventEmitter(module).addListener(name, cb)` — what every
+ * published version of this package did — subscribes to a channel nothing ever writes to. It does
+ * not throw. It simply never fires, which is the worst possible failure mode for an analytics SDK.
  *
  * ## Why lazily
  *
- * `index.ts`, `billing.ts` and `push.ts` each used to run `new NativeEventEmitter(AppdnaModule)` at
- * MODULE SCOPE. On a runtime without the native module — Expo Go, RN Web, or an app whose
- * `pod install` never ran — `AppdnaModule` is `undefined` and RN answers with
- * `Invariant Violation: 'new NativeEventEmitter()' requires a non-null argument`, thrown at import,
- * before any host code runs and before any error of ours could be raised.
- *
- * So the emitter is built on first use, not on import. A host that imports this package on a
- * platform where it never calls it gets silence, which is the correct behavior.
+ * `index.ts`, `billing.ts` and `push.ts` each used to resolve the module at MODULE SCOPE. On a
+ * runtime without it — Expo Go, RN Web, or an app whose `pod install` never ran — that threw at
+ * import, before any host code ran and before any error of ours could be raised. So the module is
+ * resolved on first use. A host that imports this package on a platform where it never calls it
+ * gets silence, which is the correct behavior.
  */
 
 /** The bare, useless error five published versions of this package produced. */
@@ -23,15 +31,40 @@ const DIRECTED_ERROR =
   '  • RN Web and Yarn PnP are not supported.\n' +
   '  See https://docs.appdna.ai/sdks/react-native/installation';
 
+/**
+ * The module resolves under the legacy bridge too — codegen still exports an `RCT_EXPORT_MODULE`
+ * class — but its event emitters are installed only by the TurboModule runtime, so every listener
+ * would go dead. Naming that here is the difference between a five-minute fix and a week of "the
+ * SDK works but no callback ever fires".
+ */
+const NEW_ARCH_ERROR =
+  '[AppDNA] The AppDNA React Native SDK requires the New Architecture (react-native >= 0.76.4 with\n' +
+  '  `newArchEnabled=true`). The native module was found, but its event emitters are missing, which\n' +
+  '  means the app is running on the legacy bridge and no SDK callback would ever fire.\n' +
+  '  See https://docs.appdna.ai/sdks/react-native/installation';
+
+/** Any emitter property proves the TurboModule runtime installed them. */
+const SENTINEL_EMITTER = 'onInitDegraded';
+
+let cached: Spec | undefined;
+
 /** Whether the native module is present. Never throws — callers decide what absence means. */
 export function hasNativeModule(): boolean {
-  return Boolean(NativeModules.AppdnaModule);
+  return TurboModuleRegistry.get<Spec>('AppdnaModule') != null;
 }
 
 /** The native module, or a directed error explaining exactly which runtime you are on. */
-export function requireNativeModule(): typeof NativeModules.AppdnaModule {
-  const mod = NativeModules.AppdnaModule;
+export function requireNativeModule(): Spec {
+  if (cached) return cached;
+
+  const mod = TurboModuleRegistry.get<Spec>('AppdnaModule');
   if (!mod) throw new Error(DIRECTED_ERROR);
+
+  if (typeof (mod as unknown as Record<string, unknown>)[SENTINEL_EMITTER] !== 'function') {
+    throw new Error(NEW_ARCH_ERROR);
+  }
+
+  cached = mod;
   return mod;
 }
 
@@ -39,28 +72,65 @@ export function requireNativeModule(): typeof NativeModules.AppdnaModule {
  * A stand-in that raises the directed error on the first METHOD CALL rather than at import.
  * Property reads are what the facade does; each resolves through `requireNativeModule`.
  */
-export const AppdnaModule: typeof NativeModules.AppdnaModule = new Proxy(
-  {},
-  {
-    get(_target, prop: string) {
-      return requireNativeModule()[prop];
-    },
+export const AppdnaModule: Spec = new Proxy({} as Spec, {
+  get(_target, prop: string) {
+    return (requireNativeModule() as unknown as Record<string, unknown>)[prop];
   },
-);
-
-let cachedEmitter: NativeEventEmitter | undefined;
+}) as Spec;
 
 /**
- * The shared event emitter, constructed on first use.
- * Throws the directed error — not RN's `Invariant Violation` — when the module is absent.
+ * The events the native side can emit, read off the generated spec so a renamed event is a type
+ * error at every call site rather than a listener that never fires.
+ *
+ * Every event name begins with `on`; so does exactly one method, `onReady`, which is excluded by
+ * name. `check:rn-facade-parity` (P6) asserts this set equals `SDK_EVENTS`.
  */
-export function nativeEmitter(): NativeEventEmitter {
-  if (cachedEmitter) return cachedEmitter;
-  cachedEmitter = new NativeEventEmitter(requireNativeModule());
-  return cachedEmitter;
+export type AppdnaEventName = Exclude<Extract<keyof Spec, `on${string}`>, 'onReady'>;
+
+/**
+ * Subscribe to a native event through the TurboModule's generated emitter property.
+ *
+ * The emitter is a plain closure on the JSI host object, so calling it unbound is safe. A missing
+ * emitter is a codegen/spec drift bug, never a runtime condition — hence the throw.
+ */
+export function addNativeListener<T>(
+  event: AppdnaEventName,
+  listener: (payload: T) => void,
+): EventSubscription {
+  const emitter = (requireNativeModule() as unknown as Record<string, unknown>)[event];
+  if (typeof emitter !== 'function') {
+    throw new Error(`[AppDNA] the native module has no emitter for '${String(event)}'.`);
+  }
+  return (emitter as (l: (payload: T) => void) => EventSubscription)(listener);
 }
 
-/** Test seam: drop the memoised emitter so a suite can re-resolve against a fresh mock. */
-export function __resetNativeEmitterForTesting(): void {
-  cachedEmitter = undefined;
+/** Test seam: drop the memoised module so a suite can re-resolve against a fresh mock. */
+export function __resetNativeModuleForTesting(): void {
+  cached = undefined;
+}
+
+/**
+ * SPEC-070-B E2 — parse a value that crossed the bridge as a JSON string.
+ *
+ * `getRemoteConfig`, `getFeatureVariant`, `getExperimentConfig`, `getPushToken`,
+ * `checkDeferredDeepLink`, `getWebEntitlement` and `getLastInitError` can each return a bool, a
+ * number, a string, an array, an object, or null. There is no codegen type for "any JSON value", so
+ * native encodes and the facade decodes here — the one place, so a malformed payload has one
+ * failure mode instead of seven.
+ *
+ * A native mapper that cannot encode a value returns the literal `"null"`, never a stringified
+ * `description`. So a parse failure means the bridge is broken, not that the value was exotic, and
+ * throwing is the correct response.
+ */
+export function parseNativeJson<T>(json: string): T {
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    // `ES2020` target: `new Error(msg, { cause })` needs ES2022 lib. The received value is the
+    // diagnostic that matters; the parse error itself adds nothing.
+    throw new Error(
+      `[AppDNA] the native module returned a value that is not JSON. This is a bridge bug, not a ` +
+        `configuration problem. Received: ${JSON.stringify(json).slice(0, 120)}`,
+    );
+  }
 }

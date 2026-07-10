@@ -52,11 +52,26 @@ interface CapturedCall {
 const mockCapturedCalls: CapturedCall[] = [];
 const mockEventListeners: Map<string, ((data: unknown) => void)[]> = new Map();
 
+/**
+ * A stand-in TurboModule. Under the New Architecture the module exposes methods AND, for each event,
+ * an emitter PROPERTY that takes a listener and returns a subscription — `onReady` is the one `on*`
+ * name that is a method, and this mock reproduces that quirk rather than papering over it.
+ */
 const mockAppdnaModule = new Proxy(
   {},
   {
     get(_target, methodName: string) {
       if (methodName === 'then') return undefined; // not a thenable
+
+      if (methodName.startsWith('on') && methodName !== 'onReady') {
+        return (callback: (data: unknown) => void) => {
+          const list = mockEventListeners.get(methodName) ?? [];
+          list.push(callback);
+          mockEventListeners.set(methodName, list);
+          return { remove: () => undefined };
+        };
+      }
+
       return (...args: unknown[]) => {
         mockCapturedCalls.push({ method: methodName, args });
         return Promise.resolve(null);
@@ -65,22 +80,13 @@ const mockAppdnaModule = new Proxy(
   },
 ) as Record<string, (...args: unknown[]) => Promise<unknown>>;
 
-class MockNativeEventEmitter {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(_module?: any) {}
-  addListener(eventName: string, callback: (data: unknown) => void) {
-    const list = mockEventListeners.get(eventName) ?? [];
-    list.push(callback);
-    mockEventListeners.set(eventName, list);
-    return { remove: () => undefined };
-  }
-}
-
 jest.mock(
   'react-native',
   () => ({
-    NativeModules: { AppdnaModule: mockAppdnaModule },
-    NativeEventEmitter: MockNativeEventEmitter,
+    TurboModuleRegistry: {
+      get: () => mockAppdnaModule,
+      getEnforcing: () => mockAppdnaModule,
+    },
     Platform: { OS: 'ios', select: <T,>(spec: { default?: T; ios?: T; android?: T }) => spec.ios ?? spec.default },
   }),
   { virtual: true },

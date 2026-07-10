@@ -150,15 +150,57 @@ internal object AppdnaBridge {
     /**
      * E2 — encode a value of unknown shape (bool | number | string | array | object | null) as JSON.
      * There is no codegen type for "any JSON value", and this is the only encoding whose meaning is
-     * identical on both platforms.
+     * identical on both platforms. iOS's mirror is `AppdnaJSON.encode`.
+     *
+     * ⚠ `JSONObject(map)` does NOT wrap recursively on Android: `JSONStringer` knows `JSONObject`,
+     * `JSONArray`, `String`, `Number`, `Boolean` and nothing else, so a nested Kotlin `Map` would be
+     * written as its `toString()` — `{a={b=1}}` instead of `{"a":{"b":1}}`. [wrap] is what makes a
+     * nested value survive.
+     *
+     * A value neither side can represent encodes as `null`, never as its `toString()`. A stringified
+     * `description` is a lie that typechecks; `null` makes the facade's parse fail loudly.
      */
-    fun toJson(value: Any?): String = when (value) {
-        null -> "null"
-        is Map<*, *> -> JSONObject(value.mapKeys { it.key.toString() }).toString()
-        is List<*> -> JSONArray(value).toString()
-        is Array<*> -> JSONArray(value.toList()).toString()
-        is String -> JSONObject.quote(value)
-        is Boolean, is Number -> value.toString()
-        else -> JSONObject.quote(value.toString())
+    fun toJson(value: Any?): String = when (val wrapped = wrap(value)) {
+        JSONObject.NULL -> "null"
+        is JSONObject, is JSONArray -> wrapped.toString()
+        is String -> JSONObject.quote(wrapped)
+        is Boolean, is Number -> wrapped.toString()
+        else -> "null"
+    }
+
+    /** Recursively coerce a Kotlin value into something `org.json` can serialize. */
+    private fun wrap(value: Any?): Any = when (value) {
+        null, JSONObject.NULL -> JSONObject.NULL
+        is Map<*, *> -> JSONObject().also { obj ->
+            for ((key, inner) in value) obj.put(key.toString(), wrap(inner))
+        }
+        is List<*> -> JSONArray().also { arr -> for (inner in value) arr.put(wrap(inner)) }
+        is Array<*> -> wrap(value.toList())
+        is String, is Boolean, is Number -> value
+        else -> JSONObject.NULL
+    }
+
+    /**
+     * §5 — decode a host veto reply. The envelope is a JSON string because the eight hooks disagree
+     * on shape: four answer with a map, four with a bare boolean, and every one of them may answer
+     * `null` for "no opinion". `JSONTokener` parses all three at top level.
+     *
+     * A malformed reply decodes to `null`, which every caller reads as "apply the native default" —
+     * the same thing a timeout means. A host cannot make native throw by replying with garbage.
+     */
+    fun fromJson(json: String?): Any? {
+        if (json.isNullOrBlank()) return null
+        return try {
+            unwrap(org.json.JSONTokener(json).nextValue())
+        } catch (_: org.json.JSONException) {
+            null
+        }
+    }
+
+    private fun unwrap(value: Any?): Any? = when (value) {
+        null, JSONObject.NULL -> null
+        is JSONObject -> value.keys().asSequence().associateWith { unwrap(value.get(it)) }
+        is JSONArray -> (0 until value.length()).map { unwrap(value.get(it)) }
+        else -> value
     }
 }

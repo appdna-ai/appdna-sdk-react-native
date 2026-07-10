@@ -1,5 +1,7 @@
 package com.appdna.rn
 
+import ai.appdna.sdk.PushPayload
+import ai.appdna.sdk.SurveyResponse
 import ai.appdna.sdk.TransactionInfo
 import ai.appdna.sdk.billing.Entitlement
 import ai.appdna.sdk.billing.ProductInfo
@@ -62,5 +64,35 @@ internal object AppdnaMappers {
         product.offerToken?.let { put("offerToken", it) }
         // `isSubscription` is iOS-only: Play's ProductDetails does not surface it on this DTO, and
         // guessing from the product id would be a lie dressed as a field.
+    }
+
+    /**
+     * The push payload the SDK parsed. `action` is flattened to `action_type` / `action_value` so the
+     * facade's `PushPayload` type matches the snake_case shape the console publishes and the other
+     * three SDKs already expose.
+     */
+    fun map(payload: PushPayload): Map<String, Any?> = buildMap {
+        put("push_id", payload.pushId)
+        put("title", payload.title)
+        put("body", payload.body)
+        payload.imageUrl?.let { put("image_url", it) }
+        payload.data?.let { put("data", it) }
+        payload.action?.let {
+            put("action_type", it.type)
+            put("action_value", it.value)
+        }
+    }
+
+    /**
+     * `{questionId, answer}` — and `metadata` when the SDK captured any.
+     *
+     * `answer` is `Any` natively: a string, a number, a bool, or a list. It crosses as-is through
+     * `AppdnaBridge.toWritableMap`, which throws on a type it cannot represent rather than
+     * stringifying it.
+     */
+    fun map(response: SurveyResponse): Map<String, Any?> = buildMap {
+        put("questionId", response.questionId)
+        put("answer", response.answer)
+        response.metadata?.let { put("metadata", it) }
     }
 }

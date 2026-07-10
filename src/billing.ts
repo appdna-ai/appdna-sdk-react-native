@@ -1,5 +1,11 @@
-import { AppdnaModule as AppdnaBillingModule, nativeEmitter } from './nativeModule';
+import { AppdnaModule as AppdnaBillingModule, addNativeListener } from './nativeModule';
+import type { AppDNABillingDelegate } from './generated/delegates';
 
+/**
+ * N11 — the wire shape is the **union** of the iOS and Android entitlement models, with the keys the
+ * running platform has no concept of **omitted, never faked**. `isActive` is synthesised on Android
+ * from `status`; dates cross as ISO-8601 strings.
+ */
 export type Entitlement = {
   productId: string;
   store: string;
@@ -23,6 +29,31 @@ export type ProductInfo = {
   offerToken?: string;
 };
 
+/**
+ * The native `onEntitlementsChanged` payload. Events cross as objects — a bare array is not a legal
+ * TurboModule event payload — so the facade unwraps once, here, rather than at four call sites that
+ * each guessed differently.
+ */
+type EntitlementsChangedPayload = { entitlements: Entitlement[] };
+
+/**
+ * The core SDK only attaches its entitlement observer when the wrapper asks it to, so the first JS
+ * listener has to start it. Idempotent on the native side; the flag just avoids the bridge hop.
+ */
+let entitlementObserverStarted = false;
+
+function ensureEntitlementObserver(): void {
+  if (entitlementObserverStarted) return;
+  entitlementObserverStarted = true;
+  // Fire-and-forget: a rejection here means billing is unavailable, which the host learns from
+  // `onBillingUnavailable`. Swallowing it would hide nothing that is not already reported.
+  void AppdnaBillingModule.startEntitlementObserver();
+}
+
+/** Test seam: forget that the observer was started, so a suite can assert the first-listener call. */
+export function __resetEntitlementObserverForTesting(): void {
+  entitlementObserverStarted = false;
+}
 
 /**
  * Billing bridge for AppDNA in-app purchases.
@@ -39,15 +70,15 @@ export class AppDNABilling {
     productId: string,
     offerToken?: string
   ): Promise<PurchaseResult> {
-    return AppdnaBillingModule.purchase(productId, offerToken ?? null);
+    return AppdnaBillingModule.purchase(productId, offerToken) as Promise<PurchaseResult>;
   }
 
   /**
    * Restore previously purchased products.
-   * Syncs with the App Store / Google Play and returns all active entitlements.
+   * Syncs with the App Store / Google Play and returns the restored product IDs.
    */
-  static async restorePurchases(): Promise<Entitlement[]> {
-    return AppdnaBillingModule.restorePurchases();
+  static async restorePurchases(): Promise<string[]> {
+    return AppdnaBillingModule.restorePurchases() as Promise<string[]>;
   }
 
   /**
@@ -55,7 +86,7 @@ export class AppDNABilling {
    * Pass a list of product IDs configured in App Store Connect / Google Play Console.
    */
   static async getProducts(productIds: string[]): Promise<ProductInfo[]> {
-    return AppdnaBillingModule.getProducts(productIds);
+    return AppdnaBillingModule.getProducts(productIds) as Promise<ProductInfo[]>;
   }
 
   /**
@@ -72,7 +103,10 @@ export class AppDNABilling {
   static onEntitlementsChanged(
     callback: (entitlements: Entitlement[]) => void
   ): () => void {
-    const sub = nativeEmitter().addListener('onEntitlementsChanged', callback);
+    ensureEntitlementObserver();
+    const sub = addNativeListener<EntitlementsChangedPayload>('onEntitlementsChanged', (data) =>
+      callback(data.entitlements ?? []),
+    );
     return () => sub.remove();
   }
 
@@ -80,35 +114,39 @@ export class AppDNABilling {
    * Get all current entitlements for the user.
    */
   static async getEntitlements(): Promise<Entitlement[]> {
-    return AppdnaBillingModule.getEntitlements();
+    return AppdnaBillingModule.getEntitlements() as Promise<Entitlement[]>;
   }
 
   /**
    * Set a delegate to receive billing lifecycle callbacks.
    */
-  static setDelegate(delegate: {
-    onPurchaseCompleted?(productId: string, transaction: Record<string, unknown>): void;
-    onPurchaseFailed?(productId: string, error: string): void;
-    onEntitlementsChanged?(entitlements: Entitlement[]): void;
-    onRestoreCompleted?(restoredProducts: string[]): void;
-  }): void {
-    // Shared, memoised emitter — a per-call emitter is how a `setDelegate` leaks listeners.
-    const emitter = nativeEmitter();
+  static setDelegate(delegate: Partial<AppDNABillingDelegate>): void {
     if (delegate.onPurchaseCompleted) {
-      emitter.addListener('onPurchaseCompleted', (data: { productId: string; transaction: Record<string, unknown> }) =>
-        delegate.onPurchaseCompleted!(data.productId, data.transaction ?? {}));
+      addNativeListener<{ productId: string; transaction: Record<string, unknown> }>(
+        'onPurchaseCompleted',
+        (data) => delegate.onPurchaseCompleted!(data.productId, data.transaction ?? {}),
+      );
     }
     if (delegate.onPurchaseFailed) {
-      emitter.addListener('onPurchaseFailed', (data: { productId: string; error: string }) =>
-        delegate.onPurchaseFailed!(data.productId, data.error));
+      addNativeListener<{ productId: string; error: string }>('onPurchaseFailed', (data) =>
+        delegate.onPurchaseFailed!(data.productId, data.error),
+      );
     }
     if (delegate.onEntitlementsChanged) {
-      emitter.addListener('onEntitlementsChanged', (entitlements: Entitlement[]) =>
-        delegate.onEntitlementsChanged!(entitlements));
+      ensureEntitlementObserver();
+      addNativeListener<EntitlementsChangedPayload>('onEntitlementsChanged', (data) =>
+        delegate.onEntitlementsChanged!(data.entitlements ?? []),
+      );
     }
     if (delegate.onRestoreCompleted) {
-      emitter.addListener('onRestoreCompleted', (data: { restoredProducts: string[] }) =>
-        delegate.onRestoreCompleted!(data.restoredProducts ?? []));
+      addNativeListener<{ restoredProducts: string[] }>('onRestoreCompleted', (data) =>
+        delegate.onRestoreCompleted!(data.restoredProducts ?? []),
+      );
+    }
+    if (delegate.onBillingUnavailable) {
+      // N8 — Android-only. iOS's billing protocol has no such method, so this listener is registered
+      // on both platforms and fires on one. Documented rather than faked.
+      addNativeListener('onBillingUnavailable', () => delegate.onBillingUnavailable!());
     }
   }
 }
