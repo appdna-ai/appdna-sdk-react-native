@@ -39,7 +39,11 @@ const withAppDNA = (config, props = {}) => {
   // (1) + (2): both land in Podfile.properties.json, which `expo prebuild` reads.
   config = withPodfileProperties(config, (cfg) => {
     cfg.modResults['ios.deploymentTarget'] = deploymentTarget;
-    cfg.modResults['ios.useFrameworks'] = 'static';
+    // `dynamic`, not `static`. AppDNASDK pulls FirebaseFirestore → gRPC → BoringSSL-GRPC, and
+    // `pod install` wedges inside that target under static frameworks — measured, not assumed. The
+    // example's Podfile uses the same linkage; the two must agree or the example builds a target no
+    // Expo consumer can reproduce.
+    cfg.modResults['ios.useFrameworks'] = 'dynamic';
     return cfg;
   });
 
