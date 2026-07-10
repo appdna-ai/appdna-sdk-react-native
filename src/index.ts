@@ -24,6 +24,8 @@ export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironmen
 export { AppDNABilling } from './billing';
 export type { Entitlement, PurchaseResult, ProductInfo } from './billing';
 export { AppDNAPush } from './push';
+export { AppDNAScreenSlot } from './AppDNAScreenSlot';
+export type { AppDNAScreenSlotProps } from './AppDNAScreenSlot';
 export type { PushPayload } from './push';
 
 // MARK: - Delegate Interfaces

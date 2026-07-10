@@ -42,6 +42,16 @@ android {
 
     buildFeatures {
         buildConfig true
+        // SPEC-070-B P4: AppdnaScreenSlotView hosts a ComposeView and invokes the native
+        // @Composable `AppDNAScreenSlot(name)`, so this module compiles Composable-calling code
+        // and needs the Compose compiler. Compose BoM 2024.02.02 mirrors sdk-android; the compiler
+        // extension is 1.5.14 (Kotlin 1.9.24). Unlike the Flutter plugin (whose host pins Kotlin
+        // 1.9.22), this module inherits the CONSUMER's Kotlin — so we suppress the exact-version
+        // check in kotlinOptions rather than pin an extension that only fits one Kotlin.
+        compose true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.14'
     }
 
     compileOptions {
@@ -51,6 +61,13 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        // The Compose compiler hard-fails when its extension version doesn't exactly match the
+        // Kotlin it runs under. Because this wrapper inherits the consumer's Kotlin (default 1.9.22,
+        // example host 1.9.24), suppress the check so one extension serves every supported Kotlin.
+        freeCompilerArgs += [
+            "-P",
+            "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=$kotlin_version"
+        ]
     }
 
     sourceSets {
@@ -100,4 +117,14 @@ dependencies {
     // MINIMUM, not a lock — Gradle happily resolves something newer — so `check:version-lockstep`
     // (AC-34) asserts this coordinate equals the shipped Android version rather than assuming it.
     implementation "ai.appdna:sdk-android:1.0.42"
+
+    // SPEC-070-B P4: Compose runtime/UI + the ViewTree owners (SlotViewTreeOwner) needed to host a
+    // ComposeView outside a ComponentActivity. sdk-android pulls Compose in via `implementation`
+    // (not exported), so the wrapper declares its own aligned copies — mirrors the Flutter plugin.
+    def composeBom = platform('androidx.compose:compose-bom:2024.02.02')
+    implementation composeBom
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
+    implementation 'androidx.savedstate:savedstate-ktx:1.2.1'
 }
