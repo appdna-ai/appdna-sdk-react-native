@@ -8,13 +8,13 @@ require Pod::Executable.execute_command('node', ['-p',
 # SPEC-070-B P1 / D-q1. The core pod requires iOS 16 (AppDNASDK.podspec:15); RN's
 # `min_ios_version_supported` is lower, and CocoaPods resolves the FLOOR, not the max.
 platform :ios, '16.0'
-prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# CocoaPods' usage stats are sent SYNCHRONOUSLY at the end of `pod install`. The Flutter example
+# disables them for the same reason: on a slow route to the stats endpoint they add minutes to
+# every install for no benefit to anyone here.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+prepare_react_native_project!
 
 target 'AppdnaExample' do
   config = use_native_modules!
@@ -31,17 +31,21 @@ target 'AppdnaExample' do
 
   # SPEC-070-B P1 / D-q1 — Firebase's LINKAGE, discovered by building rather than by reading.
   #
-  # AppDNASDK depends on FirebaseFirestore. RN links pods as static libraries by default, and
+  # AppDNASDK depends on FirebaseFirestore. RN links pods as static LIBRARIES by default, and
   # CocoaPods then refuses:
   #
   #   The Swift pod `FirebaseFirestore` depends upon `FirebaseFirestoreInternal`, which does not
   #   define modules. To opt into those targets generating module maps … set `use_modular_headers!`
   #
-  # `use_modular_headers!` is CocoaPods' own remedy: it generates module maps for the ObjC pods so
-  # the Swift ones can import them while still linking statically. The alternative,
-  # `use_frameworks! :linkage => :static`, is what the Expo config plugin sets — Expo owns its
-  # Podfile, and `ios.useFrameworks: 'static'` is the only lever it exposes.
-  use_modular_headers!
+  # CocoaPods offers two remedies, and they are not equivalent. Bare `use_modular_headers!` keeps
+  # static libraries and asks CocoaPods to synthesise a module map for every ObjC pod in the graph
+  # — for RN 0.76 + hermes + the whole Firebase tree that is a resolution this machine did not
+  # finish in an hour. Static FRAMEWORKS give each pod a real module for free.
+  #
+  # Static frameworks is also what `app.plugin.js` sets (`ios.useFrameworks: 'static'`), which is
+  # the only lever Expo exposes. The bare Podfile and the config plugin must not disagree about
+  # linkage, or the example builds a target no Expo consumer can reproduce.
+  use_frameworks! :linkage => :static
 
   use_react_native!(
     :path => config[:reactNativePath],
