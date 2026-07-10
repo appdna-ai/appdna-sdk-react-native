@@ -49,6 +49,21 @@ export type {
 } from './generated/delegates';
 
 /**
+ * W16 — a synchronous, in-memory snapshot of remote config for hot-path reads.
+ *
+ * Native config reads are async bridge round-trips (and E2 makes several cross as a JSON string
+ * parsed in the facade). A component reading a flag PER RENDER would pay a hop + parse every render.
+ * This caches the whole config map and refreshes it when native fires `onRemoteConfigChanged`, so
+ * `remoteConfig.getCached(key)` is a synchronous in-memory read.
+ *
+ * It is a PERF CACHE over native reads — NOT a source of truth and NOT persistence (nothing is
+ * written to disk; that would violate ADR-001). It holds only what native already returned. Prime it
+ * once after `configure()`; per-render reads use `getCached()`, one-off reads stay async via `get()`.
+ */
+let _configSnapshot: Record<string, unknown> | null = null;
+let _configSnapshotSub: { remove: () => void } | null = null;
+
+/**
  * Main entry point for the AppDNA React Native SDK.
  * Thin wrapper around native iOS/Android SDKs via native modules.
  */
@@ -80,12 +95,21 @@ export class AppDNA {
     return AppdnaModule.reset();
   }
 
-  /** Track a custom event. */
-  static async track(
-    event: string,
-    properties?: Record<string, unknown>
-  ): Promise<void> {
-    return AppdnaModule.track(event, properties);
+  /**
+   * Track a custom event. **Fire-and-forget (W17): returns `void`, not a Promise.**
+   *
+   * `track()` crosses the JS→native bridge once per call; native batches the actual UPLOAD. Awaiting
+   * each call would add a Promise allocation and a microtask hop per event — expensive on hot paths
+   * (scroll/keystroke instrumentation is N crossings on the JS thread). The crossing is unavoidable;
+   * the per-call Promise is not. A rejection — only possible if the bridge is being torn down — is
+   * swallowed so it never surfaces as an unhandled rejection. Call {@link flush} if you need delivery
+   * confirmation.
+   */
+  static track(event: string, properties?: Record<string, unknown>): void {
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    Promise.resolve(AppdnaModule.track(event, properties)).catch(() => {
+      /* fire-and-forget: a torn-down bridge must not crash the app */
+    });
   }
 
   /** Force flush all queued events. */
@@ -338,6 +362,38 @@ export class AppDNA {
       const sub = addNativeListener('onRemoteConfigChanged', () => callback());
       return () => sub.remove();
     },
+    /**
+     * W16 — fetch the whole config map once and keep it fresh, so `getCached()` can read it
+     * synchronously. Call after `configure()`. Idempotent: it (re)fetches the snapshot and, the first
+     * time, subscribes to `onRemoteConfigChanged` to auto-refresh the cache when native's config
+     * changes. Cheap to await once; the point is that everything AFTER it is synchronous.
+     */
+    primeSnapshot: async (): Promise<void> => {
+      _configSnapshot = parseNativeJson<Record<string, unknown>>(
+        await AppdnaModule.getAllRemoteConfig(),
+      );
+      if (!_configSnapshotSub) {
+        _configSnapshotSub = addNativeListener('onRemoteConfigChanged', () => {
+          // Re-fetch on change so the cache never serves a stale value. Fire-and-forget: the read is
+          // async, but callers of getCached() see the new value on the next tick.
+          void AppdnaModule.getAllRemoteConfig()
+            .then((json) => {
+              _configSnapshot = parseNativeJson<Record<string, unknown>>(json);
+            })
+            .catch(() => {
+              /* a torn-down bridge: keep the last snapshot rather than crash */
+            });
+        });
+      }
+    },
+    /**
+     * W16 — synchronous read from the primed snapshot. Returns `undefined` if {@link primeSnapshot}
+     * has not run yet (call it after `configure()`) OR if the key is absent. For per-render flag
+     * reads; one-off reads should use the async `get()`.
+     */
+    getCached: (key: string): unknown => _configSnapshot?.[key],
+    /** W16 — whether {@link primeSnapshot} has populated the synchronous cache. */
+    hasSnapshot: (): boolean => _configSnapshot !== null,
   };
 
   /** Feature flags module. */
@@ -494,6 +550,11 @@ export class AppDNA {
    * On Android this delegates to AppDNA.shutdown(); on iOS this is a no-op.
    */
   static async shutdown(): Promise<void> {
+    // W16 — drop the config snapshot and its refresh subscription so a shutdown→configure cycle does
+    // not serve pre-shutdown config, and the listener is not left dangling.
+    _configSnapshotSub?.remove();
+    _configSnapshotSub = null;
+    _configSnapshot = null;
     return AppdnaModule.shutdown();
   }
 
