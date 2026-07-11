@@ -1,8 +1,20 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+#import <appdna_sdk_react_native/AppdnaFabricComponents.h>
 
 @implementation AppDelegate
+
+// Required because this app links pods as DYNAMIC frameworks (see the Podfile — Firebase forces it).
+// Codegen's `RCTThirdPartyFabricComponentsProvider` wraps its whole component map in
+// `#ifndef RCT_DYNAMIC_FRAMEWORKS`, so under `use_frameworks!` nothing registers AppdnaScreenSlotView
+// and React silently renders "Unimplemented component: <AppdnaScreenSlotView>" — no throw, no log.
+- (NSDictionary<NSString *, Class<RCTComponentViewProtocol>> *)thirdPartyFabricComponents
+{
+  NSMutableDictionary *components = [[super thirdPartyFabricComponents] mutableCopy];
+  [components addEntriesFromDictionary:AppdnaFabricComponents()];
+  return components;
+}
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {

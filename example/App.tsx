@@ -75,6 +75,10 @@ export default function App({ apiKey }: Props) {
       await AppDNA.identify('rn_e2e_user', { plan: 'demo' });
       append('identified rn_e2e_user');
 
+      // If init degraded, the SDK knows why — ask it rather than guessing from the outside.
+      const initError = await AppDNA.getLastInitError();
+      append(`getLastInitError → ${initError ? `${initError.type}: ${initError.message}` : 'none'}`);
+
       // The framework tag and the wrapper version are injected by native, never by this host —
       // diagnose() is where you see what it actually reported.
       setDiagnostics(await AppDNA.diagnose());
