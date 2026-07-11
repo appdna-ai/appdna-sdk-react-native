@@ -25,7 +25,7 @@ TS spec and the facade all agree **in both directions**. So "it is in the facade
 
 ---
 
-## The five things that will bite you
+## The six things that will bite you
 
 **1. The New Architecture is required, not preferred.**
 The module resolves via `TurboModuleRegistry.get`, and native emits through the codegen'd
@@ -60,6 +60,14 @@ There is no codegen type for "any JSON value", so `getRemoteConfig`, `getFeature
 `getSessionData` and friends cross as a JSON **string**, parsed in the facade. Also:
 `Record<string, unknown>` is codegen-**illegal** (`UnsupportedGenericParserError`) — general TS
 unions are fine.
+
+**6. Under `use_frameworks!`, the Fabric component does not register itself.**
+Codegen's `RCTThirdPartyFabricComponentsProvider` wraps its component map in
+`#ifndef RCT_DYNAMIC_FRAMEWORKS`. With dynamic frameworks — which Firebase forces, and the core SDK
+depends on Firebase — the registration is compiled out and `<AppDNAScreenSlot>` renders React's
+`Unimplemented component` placeholder. No throw, no log. The pod exports `AppdnaFabricComponents()`
+and the host merges it into `RCTAppDelegate`'s `thirdPartyFabricComponents`. The example does this;
+so must the docs' install steps.
 
 ---
 
