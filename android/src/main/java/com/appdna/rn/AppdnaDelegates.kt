@@ -5,6 +5,7 @@ import ai.appdna.sdk.screens.AppDNAScreenDelegate
 import ai.appdna.sdk.AppDNADeepLinkDelegate
 import ai.appdna.sdk.AppDNAInAppMessageDelegate
 import ai.appdna.sdk.AppDNAInitDelegate
+import ai.appdna.sdk.generated.AppDNALifecycleDelegate
 import ai.appdna.sdk.AppDNAPushDelegate
 import ai.appdna.sdk.AppDNASurveyDelegate
 import ai.appdna.sdk.PushPayload
@@ -346,6 +347,22 @@ internal class BillingForwarder(private val emitter: AppdnaEventEmitter) : AppDN
 internal class DeepLinkForwarder(private val emitter: AppdnaEventEmitter) : AppDNADeepLinkDelegate {
     override fun onDeepLinkReceived(url: String, params: Map<String, String>) {
         emitter.emit("onDeepLinkReceived", mapOf("url" to url, "params" to params))
+    }
+}
+
+/**
+ * SPEC-404 — the backend runtime lock. iOS wired this; Android did not, and
+ * `AppDNA.lifecycle.setDelegate(...)` is one facade with one signature, so the same JS fired on iOS
+ * and was silently deaf on Android. When the backend hard-suspends an SDK key, an Android host
+ * showed no "service unavailable" state and never learned the lock had cleared.
+ */
+internal class LifecycleForwarder(private val emitter: AppdnaEventEmitter) : AppDNALifecycleDelegate {
+    override fun onSdkRuntimeLocked(reason: String, lockedAt: String) {
+        emitter.emit("onSdkRuntimeLocked", mapOf("reason" to reason, "lockedAt" to lockedAt))
+    }
+
+    override fun onSdkRuntimeUnlocked() {
+        emitter.emit("onSdkRuntimeUnlocked", emptyMap())
     }
 }
 

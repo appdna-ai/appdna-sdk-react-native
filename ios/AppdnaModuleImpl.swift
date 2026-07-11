@@ -35,6 +35,11 @@ public final class AppdnaModuleImpl: NSObject {
     /// this, a reload left N handlers on the process-global singleton and delivered N-fold.
     private var entitlementObserverToken: UUID?
 
+    /// The `AppDNA.configUpdated` NotificationCenter observer. Must be removed in `invalidate()`:
+    /// it captures this bridge-scoped object, and a stale one left attached across a JS reload
+    /// delivers every config change N-fold — the same reload leak the forwarders below exist for.
+    private var configObserver: NSObjectProtocol?
+
     /**
      * P3 — the eight veto hooks and every observe callback are routed by these.
      *
@@ -71,8 +76,31 @@ public final class AppdnaModuleImpl: NSObject {
         AppDNA.onWebEntitlementChanged { [weak self] entitlement in
             self?.emit("onWebEntitlementChanged", ["entitlement": entitlement?.toMap() as Any])
         }
+        observeConfigUpdates()
         registerDelegates(vetoTimeout: parsed.vetoTimeout)
         resolve(nil)
+    }
+
+    /// Native posts `AppDNA.configUpdated` whenever remote config is refreshed. Nothing in this
+    /// wrapper was listening, so `remoteConfig.onChanged` and `features.onChanged` — both of them
+    /// public, both documented — never fired, on either platform. Worse, the facade's `getCached()`
+    /// snapshot (which its own docs tell you to prefer for per-render reads) refreshes ON that event:
+    /// it froze at whatever `primeSnapshot()` captured, so a flag flip reached an RN user only on the
+    /// next cold start, while `await remoteConfig.get(key)` returned the new value — two APIs in one
+    /// namespace disagreeing, silently.
+    ///
+    /// Both events fire off the one signal, which is exactly what native intends: the Android core's
+    /// comment on `configUpdated` names RN and Flutter as its consumers.
+    private func observeConfigUpdates() {
+        if configObserver != nil { return }
+        configObserver = NotificationCenter.default.addObserver(
+            forName: AppDNA.configUpdated,
+            object: nil,
+            queue: .main,
+        ) { [weak self] _ in
+            self?.emit("onRemoteConfigChanged", [:])
+            self?.emit("onFeatureFlagsChanged", [:])
+        }
     }
 
     @objc(identify:traits:resolve:reject:)
@@ -330,9 +358,19 @@ public final class AppdnaModuleImpl: NSObject {
     // The RESULT is delivered to `onScreenDismissed` / `onFlowCompleted` (events), not to the
     // promise: a screen can be dismissed long after the call settles, so a promise cannot carry it.
 
+    // The Bool these resolve is the CONTRACT (sdk-methods.ts): false = there was nothing to present
+    // from. Android returns the real answer (no `currentActivity` -> false); iOS used to hard-code
+    // `true`, so `if (!(await screens.show(id))) showFallback()` ran the fallback on Android and
+    // never on iOS — including when the screen genuinely did not appear. A promise that always
+    // resolves the same value is not a result, it is a decoration.
+
     @objc(showScreen:resolve:reject:)
     public func showScreen(_ screenId: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
+            guard AppDNA.topViewController() != nil else {
+                resolve(false)
+                return
+            }
             AppDNA.showScreen(screenId)
             resolve(true)
         }
@@ -341,6 +379,10 @@ public final class AppdnaModuleImpl: NSObject {
     @objc(showFlow:resolve:reject:)
     public func showFlow(_ flowId: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
+            guard AppDNA.topViewController() != nil else {
+                resolve(false)
+                return
+            }
             AppDNA.showFlow(flowId)
             resolve(true)
         }
@@ -357,8 +399,9 @@ public final class AppdnaModuleImpl: NSObject {
     @objc(previewScreen:resolve:reject:)
     public func previewScreen(_ json: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
-            AppDNA.previewScreen(json: json)
-            resolve(true)
+            // Forward native's real answer: false when the JSON did not parse. Resolving `true`
+            // unconditionally told a console-preview caller its malformed payload had rendered.
+            resolve(AppDNA.previewScreen(json: json))
         }
     }
 
@@ -594,6 +637,10 @@ public final class AppdnaModuleImpl: NSObject {
         if let token = entitlementObserverToken {
             AppDNA.billing.removeEntitlementsChangedHandler(token)
             entitlementObserverToken = nil
+        }
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configObserver = nil
         }
 
         // Every forwarder captures this bridge-scoped object. Leaving them attached to the

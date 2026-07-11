@@ -549,6 +549,26 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         // ScreenManager.setDelegate — the presented-screen path, which is what actually fires these.
         AppDNA.screenDelegate = ScreenForwarder(emitter)
         AppDNA.setInitDelegate(InitForwarder(emitter))
+        // SPEC-404. iOS attached this; Android did not, so `lifecycle.setDelegate(...)` — the same JS,
+        // the same signature — fired on one platform and was silently deaf on the other.
+        AppDNA.setLifecycleDelegate(LifecycleForwarder(emitter))
+
+        // Native refreshes remote config and announces it on `configUpdated`. Nothing observed it, so
+        // `remoteConfig.onChanged` / `features.onChanged` never fired and the facade's `getCached()`
+        // snapshot — which refreshes ON this event — stayed frozen until the next cold start while
+        // `await remoteConfig.get(key)` returned the new value.
+        scope.launch {
+            AppDNA.configUpdated.collect {
+                emitter.emit("onRemoteConfigChanged", emptyMap())
+                emitter.emit("onFeatureFlagsChanged", emptyMap())
+            }
+        }
+
+        // The web-entitlement observer, likewise iOS-only until now: a subscription bought on the web
+        // and unlocked mid-session updated the UI on iOS and not on Android.
+        AppDNA.onWebEntitlementChanged { entitlement ->
+            emitter.emit("onWebEntitlementChanged", mapOf("entitlement" to entitlement?.toMap()))
+        }
 
         // 🔴 `shouldShowMessage` defaults to ALLOW on timeout; `onPromoCodeSubmit` to REJECT. A
         // uniform default here is how a paywall silently starts accepting unvalidated promo codes.
@@ -647,6 +667,7 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         AppDNA.billing.setDelegate(null)
         AppDNA.deepLinks.setDelegate(null)
         AppDNA.setInitDelegate(null)
+        AppDNA.setLifecycleDelegate(null)
         AppDNA.inAppMessages.setAsyncShouldShowMessage(null)
         AppDNA.deepLinks.asyncShouldOpen = null
         AppDNA.asyncOnScreenAction = null
