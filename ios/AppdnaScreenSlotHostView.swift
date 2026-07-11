@@ -95,6 +95,12 @@ public final class AppdnaScreenSlotHostView: UIView {
         }
         hostingController = nil
         lastReported = .zero
+        // 🔴 `slotName` MUST be cleared too. Fabric RECYCLES component views: on unmount the view goes
+        // into the recycle pool with its host torn down, and on the next mount the pooled instance is
+        // handed back and `updateProps` calls `setSlotName` with the SAME name — whose `guard name !=
+        // slotName` then early-returns, `render()` never runs, and the slot stays permanently blank.
+        // Navigating away from a screen and back is enough to reproduce it.
+        slotName = ""
     }
 
     private func nearestViewController() -> UIViewController? {

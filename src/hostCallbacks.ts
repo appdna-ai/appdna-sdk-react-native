@@ -83,7 +83,22 @@ async function dispatch(event: HostCallbackEvent): Promise<void> {
   AppdnaModule.respondToHostCallback(event.callbackId, resultJson);
 }
 
-/** Installed once, on the first registered hook. Never removed — the module owns its own teardown. */
+/**
+ * Install the dispatcher for native's veto channel. Called from `configure()`, and again (harmlessly)
+ * by every `registerHostCallback`.
+ *
+ * It used to be installed ONLY by the first `registerHostCallback`, i.e. only if the host set a
+ * delegate. But native registers its veto forwarders unconditionally during configure, and the
+ * onboarding renderer awaits a veto on every step render — so with no delegate, nobody was listening
+ * on `onHostCallback` and native waited out the whole timeout before falling back to its default.
+ * With the dispatcher always present, an unhandled hook replies immediately with "no opinion", which
+ * is what a host that never registered anything means.
+ */
+export function installHostCallbackDispatcher(): void {
+  ensureDispatcher();
+}
+
+/** Installed once. Never removed — the module owns its own teardown. */
 function ensureDispatcher(): void {
   if (dispatcherInstalled) return;
   dispatcherInstalled = true;

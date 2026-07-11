@@ -1,5 +1,11 @@
-import { AppdnaModule, addNativeListener, parseNativeJson } from './nativeModule';
-import { registerHostCallback } from './hostCallbacks';
+import {
+  AppdnaModule,
+  addNativeListener,
+  parseNativeJson,
+  setDelegateListeners,
+  removeAllDelegateListeners,
+} from './nativeModule';
+import { registerHostCallback, installHostCallbackDispatcher } from './hostCallbacks';
 import type {
   WebEntitlement,
   DeferredDeepLink,
@@ -76,6 +82,13 @@ export class AppDNA {
     env: AppDNAEnvironment = 'production',
     options?: AppDNAOptions
   ): Promise<void> {
+    // The veto dispatcher must exist BEFORE native starts asking. Native registers all eight hooks
+    // unconditionally during configure(), and the onboarding renderer awaits `onBeforeStepRender` on
+    // EVERY step. If the dispatcher were installed lazily by the first `setDelegate` — as it was —
+    // then a host that registers no delegate at all (the common integration) would answer nothing,
+    // and native would sit out the full veto timeout (5 s by default) before applying its default:
+    // a five-second freeze before every onboarding step, every deep link, every in-app message.
+    installHostCallbackDispatcher();
     return AppdnaModule.configure(apiKey, env, options);
   }
 
@@ -252,12 +265,12 @@ export class AppDNA {
       parseNativeJson<string | null>(await AppdnaModule.getPushToken()),
     /** Set a delegate to receive push notification callbacks. */
     setDelegate: (delegate: AppDNAPushDelegate): void => {
-      addNativeListener<{ token: string }>('onPushTokenRegistered', (data) =>
-        delegate.onPushTokenRegistered(data.token));
-      addNativeListener<{ payload: Record<string, unknown>; inForeground: boolean }>('onPushReceived', (data) =>
-        delegate.onPushReceived(data.payload, data.inForeground));
-      addNativeListener<{ payload: Record<string, unknown>; actionId?: string }>('onPushTapped', (data) =>
-        delegate.onPushTapped(data.payload, data.actionId));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('push', () => [
+        addNativeListener<{ token: string }>('onPushTokenRegistered', (data) => delegate.onPushTokenRegistered(data.token)),
+        addNativeListener<{ payload: Record<string, unknown>; inForeground: boolean }>('onPushReceived', (data) => delegate.onPushReceived(data.payload, data.inForeground)),
+        addNativeListener<{ payload: Record<string, unknown>; actionId?: string }>('onPushTapped', (data) => delegate.onPushTapped(data.payload, data.actionId)),
+      ]);
     },
   };
 
@@ -267,16 +280,14 @@ export class AppDNA {
       AppdnaModule.presentOnboarding(flowId, context),
     /** Set a delegate to receive onboarding lifecycle callbacks. */
     setDelegate: (delegate: AppDNAOnboardingDelegate): void => {
-      addNativeListener<{ flowId: string }>('onOnboardingStarted', (data) =>
-        delegate.onOnboardingStarted(data.flowId));
-      addNativeListener<{ flowId: string; stepId: string; stepIndex: number; totalSteps: number }>('onOnboardingStepChanged', (data) =>
-        delegate.onOnboardingStepChanged(data.flowId, data.stepId, data.stepIndex, data.totalSteps));
-      addNativeListener<{ flowId: string; responses: Record<string, unknown> }>('onOnboardingCompleted', (data) =>
-        delegate.onOnboardingCompleted(data.flowId, data.responses));
-      addNativeListener<{ flowId: string; atStep: number }>('onOnboardingDismissed', (data) =>
-        delegate.onOnboardingDismissed(data.flowId, data.atStep));
-      addNativeListener<{ flowId: string; stepId: string; permissionType: string; granted: boolean }>('onPermissionResult', (data) =>
-        delegate.onPermissionResult(data.flowId, data.stepId, data.permissionType, data.granted));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('onboarding', () => [
+        addNativeListener<{ flowId: string }>('onOnboardingStarted', (data) => delegate.onOnboardingStarted(data.flowId)),
+        addNativeListener<{ flowId: string; stepId: string; stepIndex: number; totalSteps: number }>('onOnboardingStepChanged', (data) => delegate.onOnboardingStepChanged(data.flowId, data.stepId, data.stepIndex, data.totalSteps)),
+        addNativeListener<{ flowId: string; responses: Record<string, unknown> }>('onOnboardingCompleted', (data) => delegate.onOnboardingCompleted(data.flowId, data.responses)),
+        addNativeListener<{ flowId: string; atStep: number }>('onOnboardingDismissed', (data) => delegate.onOnboardingDismissed(data.flowId, data.atStep)),
+        addNativeListener<{ flowId: string; stepId: string; permissionType: string; granted: boolean }>('onPermissionResult', (data) => delegate.onPermissionResult(data.flowId, data.stepId, data.permissionType, data.granted)),
+      ]);
 
       // §5 — the four hooks native AWAITS. They go on the host-callback channel, not the one-way
       // event channel, because native blocks the onboarding step until JS answers or the timer fires.
@@ -314,28 +325,20 @@ export class AppDNA {
       AppdnaModule.presentPaywall(paywallId, context),
     /** Set a delegate to receive paywall lifecycle callbacks. */
     setDelegate: (delegate: AppDNAPaywallDelegate): void => {
-      addNativeListener<{ paywallId: string }>('onPaywallPresented', (data) =>
-        delegate.onPaywallPresented(data.paywallId));
-      addNativeListener<{ paywallId: string; action: string }>('onPaywallAction', (data) =>
-        delegate.onPaywallAction(data.paywallId, data.action));
-      addNativeListener<{ paywallId: string; productId: string }>('onPaywallPurchaseStarted', (data) =>
-        delegate.onPaywallPurchaseStarted(data.paywallId, data.productId));
-      addNativeListener<{ paywallId: string; productId: string; transaction: Record<string, unknown> }>('onPaywallPurchaseCompleted', (data) =>
-        delegate.onPaywallPurchaseCompleted(data.paywallId, data.productId, data.transaction));
-      addNativeListener<{ paywallId: string; error: string }>('onPaywallPurchaseFailed', (data) =>
-        delegate.onPaywallPurchaseFailed(data.paywallId, data.error));
-      addNativeListener<{ paywallId: string }>('onPaywallDismissed', (data) =>
-        delegate.onPaywallDismissed(data.paywallId));
-      addNativeListener<{ paywallId: string }>('onPaywallRestoreStarted', (data) =>
-        delegate.onPaywallRestoreStarted(data.paywallId));
-      addNativeListener<{ paywallId: string; restoredProductIds: string[] }>('onPaywallRestoreCompleted', (data) =>
-        delegate.onPaywallRestoreCompleted(data.paywallId, data.restoredProductIds));
-      addNativeListener<{ paywallId: string; error: string }>('onPaywallRestoreFailed', (data) =>
-        delegate.onPaywallRestoreFailed(data.paywallId, data.error));
-      addNativeListener<{ paywallId: string; url: string }>('onPostPurchaseDeepLink', (data) =>
-        delegate.onPostPurchaseDeepLink(data.paywallId, data.url));
-      addNativeListener<{ paywallId: string }>('onPostPurchaseNextStep', (data) =>
-        delegate.onPostPurchaseNextStep(data.paywallId));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('paywall', () => [
+        addNativeListener<{ paywallId: string }>('onPaywallPresented', (data) => delegate.onPaywallPresented(data.paywallId)),
+        addNativeListener<{ paywallId: string; action: string }>('onPaywallAction', (data) => delegate.onPaywallAction(data.paywallId, data.action)),
+        addNativeListener<{ paywallId: string; productId: string }>('onPaywallPurchaseStarted', (data) => delegate.onPaywallPurchaseStarted(data.paywallId, data.productId)),
+        addNativeListener<{ paywallId: string; productId: string; transaction: Record<string, unknown> }>('onPaywallPurchaseCompleted', (data) => delegate.onPaywallPurchaseCompleted(data.paywallId, data.productId, data.transaction)),
+        addNativeListener<{ paywallId: string; error: string }>('onPaywallPurchaseFailed', (data) => delegate.onPaywallPurchaseFailed(data.paywallId, data.error)),
+        addNativeListener<{ paywallId: string }>('onPaywallDismissed', (data) => delegate.onPaywallDismissed(data.paywallId)),
+        addNativeListener<{ paywallId: string }>('onPaywallRestoreStarted', (data) => delegate.onPaywallRestoreStarted(data.paywallId)),
+        addNativeListener<{ paywallId: string; restoredProductIds: string[] }>('onPaywallRestoreCompleted', (data) => delegate.onPaywallRestoreCompleted(data.paywallId, data.restoredProductIds)),
+        addNativeListener<{ paywallId: string; error: string }>('onPaywallRestoreFailed', (data) => delegate.onPaywallRestoreFailed(data.paywallId, data.error)),
+        addNativeListener<{ paywallId: string; url: string }>('onPostPurchaseDeepLink', (data) => delegate.onPostPurchaseDeepLink(data.paywallId, data.url)),
+        addNativeListener<{ paywallId: string }>('onPostPurchaseNextStep', (data) => delegate.onPostPurchaseNextStep(data.paywallId)),
+      ]);
 
       // 🔴 The one veto that defaults to REJECT. A host that does not implement it gets the native
       // default, which refuses every code — never the "accept any non-blank string" fallback.
@@ -429,16 +432,17 @@ export class AppDNA {
     suppressDisplay: (suppress: boolean): void => AppdnaModule.suppressMessages(suppress),
     /** Set a delegate to receive in-app message lifecycle callbacks. */
     setDelegate: (delegate: AppDNAInAppMessageDelegate): void => {
-      addNativeListener<{ messageId: string; trigger: string }>('onMessageShown', (data) => {
-        delegate.onMessageShown(data.messageId, data.trigger);
-        // Deprecated shim. Native never emitted `onMessagePresented`; forwarding keeps a host that
-        // implemented it from silently going deaf when it upgrades.
-        delegate.onMessagePresented?.(data.messageId);
-      });
-      addNativeListener<{ messageId: string; action: string; data?: Record<string, unknown> }>('onMessageAction', (data) =>
-        delegate.onMessageAction(data.messageId, data.action, data.data));
-      addNativeListener<{ messageId: string }>('onMessageDismissed', (data) =>
-        delegate.onMessageDismissed(data.messageId));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('inAppMessages', () => [
+        addNativeListener<{ messageId: string; trigger: string }>('onMessageShown', (data) => {
+          delegate.onMessageShown(data.messageId, data.trigger);
+          // Deprecated shim. Native never emitted `onMessagePresented`; forwarding keeps a host that
+          // implemented it from silently going deaf when it upgrades.
+          delegate.onMessagePresented?.(data.messageId);
+        }),
+        addNativeListener<{ messageId: string; action: string; data?: Record<string, unknown> }>('onMessageAction', (data) => delegate.onMessageAction(data.messageId, data.action, data.data)),
+        addNativeListener<{ messageId: string }>('onMessageDismissed', (data) => delegate.onMessageDismissed(data.messageId)),
+      ]);
       // §5.1 — `shouldShowMessage` is a VETO, not an observation. It used to be registered on the
       // one-way event channel, where the listener's return value is discarded and a message the host
       // suppressed was shown anyway. It goes on the host-callback channel, which native awaits.
@@ -452,12 +456,12 @@ export class AppDNA {
     present: (surveyId: string): Promise<void> => AppdnaModule.presentSurvey(surveyId),
     /** Set a delegate to receive survey lifecycle callbacks. */
     setDelegate: (delegate: AppDNASurveyDelegate): void => {
-      addNativeListener<{ surveyId: string }>('onSurveyPresented', (data) =>
-        delegate.onSurveyPresented(data.surveyId));
-      addNativeListener<{ surveyId: string; responses: Array<Record<string, unknown>> }>('onSurveyCompleted', (data) =>
-        delegate.onSurveyCompleted(data.surveyId, data.responses));
-      addNativeListener<{ surveyId: string }>('onSurveyDismissed', (data) =>
-        delegate.onSurveyDismissed(data.surveyId));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('surveys', () => [
+        addNativeListener<{ surveyId: string }>('onSurveyPresented', (data) => delegate.onSurveyPresented(data.surveyId)),
+        addNativeListener<{ surveyId: string; responses: Array<Record<string, unknown>> }>('onSurveyCompleted', (data) => delegate.onSurveyCompleted(data.surveyId, data.responses)),
+        addNativeListener<{ surveyId: string }>('onSurveyDismissed', (data) => delegate.onSurveyDismissed(data.surveyId)),
+      ]);
     },
   };
 
@@ -523,12 +527,12 @@ export class AppDNA {
      * return value is discarded. Defaults to allow.
      */
     setDelegate: (delegate: AppDNAScreenDelegate): void => {
-      addNativeListener<{ screenId: string }>('onScreenPresented', (data) =>
-        delegate.onScreenPresented(data.screenId));
-      addNativeListener<{ screenId: string; result: Record<string, unknown> }>('onScreenDismissed', (data) =>
-        delegate.onScreenDismissed(data.screenId, data.result));
-      addNativeListener<{ flowId: string; result: Record<string, unknown> }>('onFlowCompleted', (data) =>
-        delegate.onFlowCompleted(data.flowId, data.result));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('screens', () => [
+        addNativeListener<{ screenId: string }>('onScreenPresented', (data) => delegate.onScreenPresented(data.screenId)),
+        addNativeListener<{ screenId: string; result: Record<string, unknown> }>('onScreenDismissed', (data) => delegate.onScreenDismissed(data.screenId, data.result)),
+        addNativeListener<{ flowId: string; result: Record<string, unknown> }>('onFlowCompleted', (data) => delegate.onFlowCompleted(data.flowId, data.result)),
+      ]);
       registerHostCallback('onScreenAction', (args) =>
         delegate.onScreenAction(args.screenId as string, args.action as Record<string, unknown>));
     },
@@ -539,8 +543,10 @@ export class AppDNA {
     handleURL: (url: string): Promise<void> => AppdnaModule.handleDeepLink(url),
     /** Set a delegate to receive deep link callbacks. */
     setDelegate: (delegate: AppDNADeepLinkDelegate): void => {
-      addNativeListener<{ url: string; params?: Record<string, string> }>('onDeepLinkReceived', (data) =>
-        delegate.onDeepLinkReceived(data.url, data.params ?? {}));
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('deepLinks', () => [
+        addNativeListener<{ url: string; params?: Record<string, string> }>('onDeepLinkReceived', (data) => delegate.onDeepLinkReceived(data.url, data.params ?? {})),
+      ]);
       // §5 — a veto: native awaits it before dispatching the link, so it cannot ride the event
       // channel, where a listener's return value is discarded. Defaults to allow.
       registerHostCallback('shouldOpen', (a) =>
@@ -554,9 +560,11 @@ export class AppDNA {
    */
   static lifecycle = {
     setDelegate: (delegate: AppDNALifecycleDelegate): void => {
-      addNativeListener<{ reason: string; lockedAt: string }>('onSdkRuntimeLocked', (data) =>
-        delegate.onSdkRuntimeLocked(data.reason, data.lockedAt));
-      addNativeListener('onSdkRuntimeUnlocked', () => delegate.onSdkRuntimeUnlocked());
+      // Replaces the previous delegate's listeners rather than stacking a second set on top.
+      setDelegateListeners('lifecycle', () => [
+        addNativeListener<{ reason: string; lockedAt: string }>('onSdkRuntimeLocked', (data) => delegate.onSdkRuntimeLocked(data.reason, data.lockedAt)),
+        addNativeListener('onSdkRuntimeUnlocked', () => delegate.onSdkRuntimeUnlocked()),
+      ]);
     },
   };
 
@@ -630,6 +638,9 @@ export class AppDNA {
     _configSnapshotSub?.remove();
     _configSnapshotSub = null;
     _configSnapshot = null;
+    // Every delegate's listeners go too. They are subscriptions on a process-global native emitter;
+    // leaving them attached across shutdown→configure is how one event reaches N stale delegates.
+    removeAllDelegateListeners();
     return AppdnaModule.shutdown();
   }
 

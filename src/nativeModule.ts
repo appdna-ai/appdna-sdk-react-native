@@ -104,8 +104,45 @@ export function addNativeListener<T>(
   return (emitter as (l: (payload: T) => void) => EventSubscription)(listener);
 }
 
+/**
+ * Listeners owned by one delegate slot, so a later `setDelegate` REPLACES the earlier one.
+ *
+ * 🔴 Every `setDelegate` used to call `addNativeListener` and throw the subscription away. There was
+ * no unsubscribe path at all. A screen that registers a delegate in a `useEffect` and remounts — a
+ * tab switch, a navigation-back, a Fast Refresh — stacked another full set of listeners, and one
+ * `onPaywallPurchaseCompleted` then invoked N delegates: N entitlement grants, N analytics events,
+ * and the delegates of unmounted screens still live, holding their closures.
+ *
+ * The keys are delegate slots (one per namespace), not event names: replacing a delegate must drop
+ * exactly the listeners that delegate installed, and nothing else.
+ */
+const delegateSubscriptions = new Map<string, EventSubscription[]>();
+
+/**
+ * Install a delegate's listeners, removing whatever the previous delegate in that slot installed.
+ * Idempotent by construction: calling it twice leaves one set of listeners, not two.
+ */
+export function setDelegateListeners(
+  slot: string,
+  install: () => EventSubscription[],
+): void {
+  for (const sub of delegateSubscriptions.get(slot) ?? []) {
+    sub.remove();
+  }
+  delegateSubscriptions.set(slot, install());
+}
+
+/** Drop every delegate's listeners — `shutdown()`, and the test seam below. */
+export function removeAllDelegateListeners(): void {
+  for (const subs of delegateSubscriptions.values()) {
+    for (const sub of subs) sub.remove();
+  }
+  delegateSubscriptions.clear();
+}
+
 /** Test seam: drop the memoised module so a suite can re-resolve against a fresh mock. */
 export function __resetNativeModuleForTesting(): void {
+  removeAllDelegateListeners();
   cached = undefined;
 }
 

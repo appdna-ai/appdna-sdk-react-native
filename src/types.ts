@@ -43,4 +43,23 @@ export interface AppDNAOptions {
   logLevel?: AppDNALogLevel;
   /** Billing provider for paywall purchases (iOS only). Default: 'storeKit2'. */
   billingProvider?: AppDNABillingProvider;
+  /**
+   * Seconds a host veto may take before native applies the hook's own default. Default 5.
+   *
+   * Both `parseOptions` implementations have always read this, and it was missing from this type —
+   * so the timeout that all eight veto hooks depend on could not be set from TypeScript without an
+   * error. A knob native reads and TS forbids is not a knob.
+   */
+  vetoTimeout?: number;
+  /**
+   * When true, analytics stay OFF until `setConsent(true)`, and no event — not even
+   * `sdk_initialized` — is emitted before that decision. Default false (analytics are opt-out).
+   * Read by both natives; likewise absent from this type until now.
+   */
+  requireConsent?: boolean;
+  /**
+   * Android-only: the notification small-icon drawable resource id (an `R.drawable.*` int). Ignored
+   * on iOS. Only useful when a native Android layer supplies the id.
+   */
+  notificationIcon?: number;
 }

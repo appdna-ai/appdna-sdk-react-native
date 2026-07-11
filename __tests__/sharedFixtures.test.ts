@@ -177,12 +177,7 @@ function loadRnFixtures(): Fixture[] {
 
 // ---- Drivers + assertions ---------------------------------------------
 
-interface FixtureSkip {
-  readonly skipped: true;
-  readonly reason: string;
-}
-
-async function runFixture(fixture: Fixture): Promise<FixtureSkip | undefined> {
+async function runFixture(fixture: Fixture): Promise<void> {
   switch (fixture.action.kind) {
     case 'track_event': {
       // SPEC-070-B §18: the fixture key is `event_name`, not `event`. The driver read the wrong key
@@ -195,7 +190,7 @@ async function runFixture(fixture: Fixture): Promise<FixtureSkip | undefined> {
         | Record<string, unknown>
         | undefined;
       await AppDNA.track(event, properties);
-      return undefined;
+      return;
     }
     case 'identify': {
       const userId = fixture.action.userId as string | undefined;
@@ -204,13 +199,22 @@ async function runFixture(fixture: Fixture): Promise<FixtureSkip | undefined> {
         | Record<string, unknown>
         | undefined;
       await AppDNA.identify(userId, traits);
-      return undefined;
+      return;
     }
     default:
-      return {
-        skipped: true,
-        reason: `Phase 0.5+ assertion not yet implemented for action.kind=${fixture.action.kind}`,
-      };
+      // 🔴 There used to be a soft-skip here: `{skipped: true, reason: 'not yet implemented'}`, and the
+      // harness `console.warn`ed it and RETURNED — inside the `it()`. Jest printed a tick. 35 of the 37
+      // rn fixtures were green no-ops, including every paywall, purchase and push fixture. Emptying
+      // `AppDNA.presentPaywall` left all five paywall fixtures passing.
+      //
+      // A fixture the RN runner cannot drive is not a fixture the RN runner may pass. Either the
+      // wrapper has a code path for the action — in which case drive it — or the fixture is asserting
+      // native behaviour the wrapper does not implement, in which case its `platforms` list must not
+      // claim `rn`. Both are honest; a skip that prints ✓ is not.
+      throw new Error(
+        `[${fixture.id}] no RN driver for action.kind=${fixture.action.kind}. Either add one, or ` +
+          `remove "rn" from this fixture's platforms — it asserts behaviour the wrapper does not have.`,
+      );
   }
 }
 
@@ -255,12 +259,7 @@ describe('SharedFixtures (React Native bridge contract)', () => {
 
   describe.each(fixtures.map((f) => [f.id, f] as const))('%s', (_id, fixture) => {
     it(fixture.description, async () => {
-      const skip = await runFixture(fixture);
-      if (skip) {
-        // eslint-disable-next-line no-console
-        console.warn(`[sharedFixtures] SKIP ${fixture.id} — ${skip.reason}`);
-        return;
-      }
+      await runFixture(fixture);
       assertBridgeContract(fixture);
     });
   });

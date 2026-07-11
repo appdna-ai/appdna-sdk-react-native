@@ -1,4 +1,8 @@
-import { AppdnaModule as AppdnaBillingModule, addNativeListener } from './nativeModule';
+import {
+  AppdnaModule as AppdnaBillingModule,
+  addNativeListener,
+  setDelegateListeners,
+} from './nativeModule';
 import type { AppDNABillingDelegate } from './generated/delegates';
 
 /**
@@ -121,32 +125,38 @@ export class AppDNABilling {
    * Set a delegate to receive billing lifecycle callbacks.
    */
   static setDelegate(delegate: Partial<AppDNABillingDelegate>): void {
-    if (delegate.onPurchaseCompleted) {
-      addNativeListener<{ productId: string; transaction: Record<string, unknown> }>(
-        'onPurchaseCompleted',
-        (data) => delegate.onPurchaseCompleted!(data.productId, data.transaction ?? {}),
-      );
-    }
-    if (delegate.onPurchaseFailed) {
-      addNativeListener<{ productId: string; error: string }>('onPurchaseFailed', (data) =>
-        delegate.onPurchaseFailed!(data.productId, data.error),
-      );
-    }
-    if (delegate.onEntitlementsChanged) {
-      ensureEntitlementObserver();
-      addNativeListener<EntitlementsChangedPayload>('onEntitlementsChanged', (data) =>
-        delegate.onEntitlementsChanged!(data.entitlements ?? []),
-      );
-    }
-    if (delegate.onRestoreCompleted) {
-      addNativeListener<{ restoredProducts: string[] }>('onRestoreCompleted', (data) =>
-        delegate.onRestoreCompleted!(data.restoredProducts ?? []),
-      );
-    }
-    if (delegate.onBillingUnavailable) {
-      // N8 — Android-only. iOS's billing protocol has no such method, so this listener is registered
-      // on both platforms and fires on one. Documented rather than faked.
-      addNativeListener('onBillingUnavailable', () => delegate.onBillingUnavailable!());
-    }
+    // Replaces the previous delegate's listeners. Without this, a remount stacked another set and one
+    // `onPurchaseCompleted` invoked every delegate ever registered — N entitlement grants for one buy.
+    setDelegateListeners('billing', () => {
+      const subs = [];
+      if (delegate.onPurchaseCompleted) {
+        subs.push(addNativeListener<{ productId: string; transaction: Record<string, unknown> }>(
+          'onPurchaseCompleted',
+          (data) => delegate.onPurchaseCompleted!(data.productId, data.transaction ?? {}),
+        ));
+      }
+      if (delegate.onPurchaseFailed) {
+        subs.push(addNativeListener<{ productId: string; error: string }>('onPurchaseFailed', (data) =>
+          delegate.onPurchaseFailed!(data.productId, data.error),
+        ));
+      }
+      if (delegate.onEntitlementsChanged) {
+        ensureEntitlementObserver();
+        subs.push(addNativeListener<EntitlementsChangedPayload>('onEntitlementsChanged', (data) =>
+          delegate.onEntitlementsChanged!(data.entitlements ?? []),
+        ));
+      }
+      if (delegate.onRestoreCompleted) {
+        subs.push(addNativeListener<{ restoredProducts: string[] }>('onRestoreCompleted', (data) =>
+          delegate.onRestoreCompleted!(data.restoredProducts ?? []),
+        ));
+      }
+      if (delegate.onBillingUnavailable) {
+        // N8 — Android-only. iOS's billing protocol has no such method, so this listener is registered
+        // on both platforms and fires on one. Documented rather than faked.
+        subs.push(addNativeListener('onBillingUnavailable', () => delegate.onBillingUnavailable!()));
+      }
+      return subs;
+    });
   }
 }

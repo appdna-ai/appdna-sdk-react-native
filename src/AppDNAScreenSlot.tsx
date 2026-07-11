@@ -69,6 +69,17 @@ export function AppDNAScreenSlot({
     lastKnownHeight.get(name),
   );
 
+  // A `name` change on a LIVE instance is a different slot: the lazy initializer above only runs on
+  // the first mount, so without this the container kept the previous slot's height. If nothing is
+  // published for the new name, native never fires `onContentSizeChange` and that stale height stays
+  // forever — a block of empty space, which is the very layout defect the height cache exists to
+  // prevent.
+  const [renderedName, setRenderedName] = useState(name);
+  if (renderedName !== name) {
+    setRenderedName(name);
+    setMeasuredHeight(lastKnownHeight.get(name));
+  }
+
   const handleSize = useCallback(
     (event: NativeSyntheticEvent<{ width: number; height: number }>) => {
       const { width, height } = event.nativeEvent;
