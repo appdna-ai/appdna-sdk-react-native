@@ -72,17 +72,44 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
 
     // ── Lifecycle / core ──────────────────────────────────────────────────────
 
+    /**
+     * W15 / AC-37 — `configure()` must not run on the JS thread.
+     *
+     * A TurboModule method body executes on the JS THREAD on Android (E10), and
+     * `AppDNA.configure` opens SQLite, reads SharedPreferences and warms the config cache. Doing
+     * that inline stalls JS for the duration — at app start, which is precisely when the JS thread
+     * is busiest and a stall is most visible. iOS is already safe: its `configure` hops onto a
+     * utility queue internally.
+     *
+     * Calling native off the JS thread is safe: the pieces that genuinely need the main looper
+     * marshal themselves (`EventQueue.registerLifecycleObserver` posts to it "regardless of which
+     * thread constructed EventQueue"), and `AppDNA.configure` guards reentrancy with `synchronized`
+     * + `isConfiguring`.
+     *
+     * `parseOptions` stays on the JS thread deliberately: a `ReadableMap` is only valid on the
+     * thread the bridge delivered it on, so reading it after this method returns is undefined
+     * behaviour. It parses a handful of scalars — that is not the cost W15 is about.
+     */
     override fun configure(apiKey: String, env: String, options: ReadableMap?, promise: Promise) {
-        try {
-            // The wire value is `sandbox`, matching the native enum and iOS. `staging` named a case
-            // that has never existed on either platform.
-            val environment = if (env == "sandbox") Environment.SANDBOX else Environment.PRODUCTION
-            val parsed = parseOptions(options)
-            AppDNA.configure(reactContext, apiKey, environment, parsed)
-            registerDelegates(parsed.vetoTimeout)
-            promise.resolve(null)
+        // The wire value is `sandbox`, matching the native enum and iOS. `staging` named a case
+        // that has never existed on either platform.
+        val environment = if (env == "sandbox") Environment.SANDBOX else Environment.PRODUCTION
+
+        val parsed = try {
+            parseOptions(options)
         } catch (e: Throwable) {
             promise.reject("CONFIGURE_ERROR", e.message, e)
+            return
+        }
+
+        scope.launch(Dispatchers.Default) {
+            try {
+                AppDNA.configure(reactContext, apiKey, environment, parsed)
+                registerDelegates(parsed.vetoTimeout)
+                promise.resolve(null)
+            } catch (e: Throwable) {
+                promise.reject("CONFIGURE_ERROR", e.message, e)
+            }
         }
     }
 

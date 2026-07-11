@@ -37,23 +37,46 @@ export interface AppDNAScreenSlotProps {
   onContentSizeChange?: (size: { width: number; height: number }) => void;
 }
 
+/**
+ * W19 — last-known height per slot name, surviving unmount.
+ *
+ * `measuredHeight` is component state, so a REMOUNT (tab switch, list recycle, navigation back)
+ * resets it to `undefined` and the slot drops to `minHeight` for a frame before native re-measures —
+ * a visible layout shift on every remount, which is exactly what W19 forbids. AC-17 permits the
+ * 0-height first frame at the MEASUREMENT layer; AC-37 forbids it reaching the screen.
+ *
+ * Keyed by slot name, because that is what determines the content: two mounts of `home_promo` render
+ * the same server-driven surface and therefore the same height. It is a render hint only — the real
+ * measurement still replaces it on the next `onContentSizeChange`, so a stale entry costs one
+ * corrected frame, never a wrong final layout.
+ */
+const lastKnownHeight = new Map<string, number>();
+
+/** Test seam — a module-level cache would otherwise leak between tests. */
+export function __resetScreenSlotHeightCache(): void {
+  lastKnownHeight.clear();
+}
+
 export function AppDNAScreenSlot({
   name,
   minHeight = 0,
   style,
   onContentSizeChange,
 }: AppDNAScreenSlotProps): React.ReactElement {
-  // `undefined` until the first measure, so the reserved `minHeight` governs the first frame and the
-  // measured height takes over afterwards.
-  const [measuredHeight, setMeasuredHeight] = useState<number | undefined>(undefined);
+  // Seed from the last height this slot measured, so a remount reserves the right space immediately
+  // instead of collapsing to `minHeight` and shifting when the measurement lands.
+  const [measuredHeight, setMeasuredHeight] = useState<number | undefined>(() =>
+    lastKnownHeight.get(name),
+  );
 
   const handleSize = useCallback(
     (event: NativeSyntheticEvent<{ width: number; height: number }>) => {
       const { width, height } = event.nativeEvent;
+      lastKnownHeight.set(name, height);
       setMeasuredHeight(height);
       onContentSizeChange?.({ width, height });
     },
-    [onContentSizeChange],
+    [name, onContentSizeChange],
   );
 
   return (
