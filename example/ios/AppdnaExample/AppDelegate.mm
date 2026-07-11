@@ -36,7 +36,9 @@
     @"appdnaApiKey" : @"apiKey",
     @"appdnaOnboardingId" : @"onboardingId",
     @"appdnaPaywallId" : @"paywallId",
+    @"appdnaPaywall2Id" : @"paywall2Id",
     @"appdnaSurveyId" : @"surveyId",
+    @"appdnaMessageEvent" : @"messageEvent",
   };
   for (NSString *arg in launchKeys) {
     NSString *value = [[NSUserDefaults standardUserDefaults] stringForKey:arg];
