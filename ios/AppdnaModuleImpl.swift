@@ -622,6 +622,10 @@ public final class AppdnaModuleImpl: NSObject {
 
     /// ⚠ `internal`, not `private`: `AppdnaParseOptionsTests` reaches it through `@testable import`
     /// (AC-11). A jest test cannot see a native `?? 3600`, and neither can a Dart one.
+    /// The WRAPPER's own version (this package), not the native SDK's. Injected, never read from the
+    /// host's options. Kept in lockstep with package.json by `check:wrapper-version-selfreport`.
+    static let wrapperVersion = "1.0.8"
+
     internal func parseOptions(_ dict: [String: Any]?) -> AppDNAOptions {
         let values = dict ?? [:]
         let defaults = AppDNAOptions()
@@ -661,7 +665,7 @@ public final class AppdnaModuleImpl: NSObject {
             billingProvider: billingProvider,
             // §7 rule 1: injected unconditionally, NOT read from `values`. A host cannot spoof it.
             framework: Self.frameworkTag,
-            frameworkVersion: values["frameworkVersion"] as? String,
+            frameworkVersion: Self.wrapperVersion,
             requireConsent: values["requireConsent"] as? Bool ?? defaults.requireConsent,
             vetoTimeout: values["vetoTimeout"] as? TimeInterval ?? defaults.vetoTimeout
         )

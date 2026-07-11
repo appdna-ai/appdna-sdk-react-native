@@ -68,6 +68,17 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
          * tag does not error, is not logged, and is not metered — it just quietly lies in BigQuery.
          */
         private const val FRAMEWORK_TAG = "react_native"
+
+        /**
+         * The WRAPPER's own version (this package), not the native SDK's — `getSdkVersion()` reports
+         * that one. Injected, never read from the host's options: the wrapper knows its own version
+         * and a host has no business claiming a different one.
+         *
+         * Kept in lockstep with package.json by `check:wrapper-version-selfreport`. Flutter shipped
+         * this constant stuck at 1.0.6 while publishing 1.0.8 — so `diagnose()` and every event
+         * envelope reported a version that had not been released for two cycles, and nothing noticed.
+         */
+        private const val WRAPPER_VERSION = "1.0.8"
     }
 
     // ── Lifecycle / core ──────────────────────────────────────────────────────
@@ -676,7 +687,7 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
             notificationIcon = (values["notificationIcon"] as? Number)?.toInt() ?: defaults.notificationIcon,
             // §7 rule 1: injected unconditionally, NOT read from `values`. A host cannot spoof it.
             framework = FRAMEWORK_TAG,
-            frameworkVersion = values["frameworkVersion"] as? String,
+            frameworkVersion = WRAPPER_VERSION,
             // AC-21: Android gained billingProvider in 1.0.42, so the host's choice finally arrives.
             billingProvider = BillingProvider.fromWire(values["billingProvider"]) ?: defaults.billingProvider,
             requireConsent = values["requireConsent"] as? Boolean ?: defaults.requireConsent,
