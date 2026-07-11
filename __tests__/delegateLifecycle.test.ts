@@ -1,0 +1,204 @@
+/**
+ * Two fixes that a round-2 audit broke on purpose — and every existing test still passed.
+ *
+ *   1. `setDelegate` REPLACES the previous delegate's listeners. It used to throw the subscription
+ *      away, so a delegate registered in a `useEffect` that remounts (tab switch, navigation-back,
+ *      Fast Refresh) stacked another full set, and one `onPaywallPurchaseCompleted` invoked N
+ *      delegates: N entitlement grants for one purchase.
+ *
+ *   2. The veto dispatcher is installed by `configure()`, not lazily by the first `setDelegate`.
+ *      Native registers its veto forwarders unconditionally during configure and the onboarding
+ *      renderer awaits a veto on EVERY step render — so with no delegate, nobody answered on
+ *      `onHostCallback` and native waited out the full timeout (5 s by default) before applying its
+ *      default. A five-second freeze before every step, for the commonest integration of all.
+ *
+ * Both were "fixed" with no test. A fix with no test is a fix with a countdown on it.
+ */
+
+const listenersByEvent = new Map<string, Array<(payload: unknown) => void>>();
+const replies: Array<{ callbackId: string; resultJson: string }> = [];
+
+/** Emitter properties are plain closures on the JSI host object; the mock mirrors that shape. */
+function emitterFor(event: string) {
+  return (listener: (payload: unknown) => void) => {
+    const list = listenersByEvent.get(event) ?? [];
+    list.push(listener);
+    listenersByEvent.set(event, list);
+    return {
+      remove: () => {
+        const current = listenersByEvent.get(event) ?? [];
+        const at = current.indexOf(listener);
+        if (at >= 0) current.splice(at, 1);
+      },
+    };
+  };
+}
+
+const EVENTS = [
+  'onInitDegraded', 'onHostCallback', 'onRemoteConfigChanged', 'onFeatureFlagsChanged',
+  'onOnboardingStarted', 'onOnboardingStepChanged', 'onOnboardingCompleted', 'onOnboardingDismissed',
+  'onPermissionResult', 'onPaywallPresented', 'onPaywallDismissed', 'onPaywallAction',
+  'onPaywallPurchaseStarted', 'onPaywallPurchaseCompleted', 'onPaywallPurchaseFailed',
+  'onPaywallRestoreStarted', 'onPaywallRestoreCompleted', 'onPaywallRestoreFailed',
+  'onPostPurchaseDeepLink', 'onPostPurchaseNextStep', 'onSurveyPresented', 'onSurveyCompleted',
+  'onSurveyDismissed', 'onMessageShown', 'onMessageAction', 'onMessageDismissed',
+  'onPushTokenRegistered', 'onPushReceived', 'onPushTapped', 'onDeepLinkReceived',
+  'onSdkRuntimeLocked', 'onSdkRuntimeUnlocked', 'onScreenPresented', 'onScreenDismissed',
+  'onFlowCompleted', 'onWebEntitlementChanged', 'onEntitlementsChanged', 'onPurchaseCompleted',
+  'onPurchaseFailed', 'onRestoreCompleted', 'onBillingUnavailable',
+];
+
+const mockModule: Record<string, unknown> = {
+  configure: jest.fn().mockResolvedValue(undefined),
+  shutdown: jest.fn().mockResolvedValue(undefined),
+  respondToHostCallback: (callbackId: string, resultJson: string) => {
+    replies.push({ callbackId, resultJson });
+  },
+};
+for (const event of EVENTS) mockModule[event] = emitterFor(event);
+
+jest.mock('react-native', () => ({
+  TurboModuleRegistry: { get: () => mockModule, getEnforcing: () => mockModule },
+  Platform: { OS: 'ios', select: (spec: Record<string, unknown>) => spec.ios ?? spec.default },
+}));
+
+import { AppDNA } from '../src/index';
+import { __resetHostCallbacksForTesting } from '../src/hostCallbacks';
+import { removeAllDelegateListeners } from '../src/nativeModule';
+
+function countListeners(event: string): number {
+  return (listenersByEvent.get(event) ?? []).length;
+}
+
+const noopSurveyDelegate = (tag: string, seen: string[]) => ({
+  onSurveyPresented: () => seen.push(tag),
+  onSurveyCompleted: () => undefined,
+  onSurveyDismissed: () => undefined,
+});
+
+beforeEach(() => {
+  removeAllDelegateListeners();
+  __resetHostCallbacksForTesting();
+  listenersByEvent.clear();
+  replies.length = 0;
+});
+
+describe('setDelegate replaces, it does not stack', () => {
+  it('a second setDelegate leaves ONE listener per event, and only the new delegate fires', () => {
+    const seen: string[] = [];
+    AppDNA.surveys.setDelegate(noopSurveyDelegate('first', seen));
+    AppDNA.surveys.setDelegate(noopSurveyDelegate('second', seen));
+
+    expect(countListeners('onSurveyPresented')).toBe(1);
+
+    for (const listener of listenersByEvent.get('onSurveyPresented') ?? []) {
+      listener({ surveyId: 's1' });
+    }
+    // If the old subscription survived, BOTH delegates run — which on the paywall means N
+    // entitlement grants for one purchase.
+    expect(seen).toEqual(['second']);
+  });
+
+  it('100 remounts leave 100 listeners if replacement is broken; they must leave 1', () => {
+    const seen: string[] = [];
+    for (let i = 0; i < 100; i++) AppDNA.surveys.setDelegate(noopSurveyDelegate(`d${i}`, seen));
+    expect(countListeners('onSurveyPresented')).toBe(1);
+  });
+
+  it('shutdown() drops every delegate slot, not just the config snapshot', async () => {
+    const seen: string[] = [];
+    AppDNA.surveys.setDelegate(noopSurveyDelegate('x', seen));
+    AppDNA.screens.setDelegate({
+      onScreenPresented: () => undefined,
+      onScreenDismissed: () => undefined,
+      onFlowCompleted: () => undefined,
+      onScreenAction: () => true,
+    });
+    expect(countListeners('onSurveyPresented')).toBe(1);
+
+    await AppDNA.shutdown();
+
+    expect(countListeners('onSurveyPresented')).toBe(0);
+    expect(countListeners('onScreenPresented')).toBe(0);
+  });
+});
+
+describe('a delegate swap replaces the VETO HOOKS too, not just the listeners', () => {
+  /** The hooks are registered conditionally, so a new delegate that omits one never overwrites it. */
+  const onboardingDelegate = (opts: { withVeto: boolean }) => ({
+    onOnboardingStarted: () => undefined,
+    onOnboardingStepChanged: () => undefined,
+    onOnboardingCompleted: () => undefined,
+    onOnboardingDismissed: () => undefined,
+    onPermissionResult: () => undefined,
+    ...(opts.withVeto
+      ? { onBeforeStepAdvance: async () => ({ type: 'block', message: 'A still here' }) }
+      : {}),
+  });
+
+  it('the OLD delegate stops vetoing when the new one does not implement the hook', async () => {
+    await AppDNA.configure('adn_test_key');
+
+    AppDNA.onboarding.setDelegate(onboardingDelegate({ withVeto: true }));
+    AppDNA.onboarding.setDelegate(onboardingDelegate({ withVeto: false }));
+
+    const listener = (listenersByEvent.get('onHostCallback') ?? [])[0]!;
+    listener({ callbackId: 'e1:9', hook: 'onBeforeStepAdvance', argsJson: JSON.stringify({ flowId: 'f' }) });
+    await new Promise((r) => setImmediate(r));
+
+    // If the swap left the first delegate's hook in place, it answers `{"type":"block",...}` — from a
+    // screen that has been unmounted — and every step advance is vetoed forever.
+    expect(replies).toEqual([{ callbackId: 'e1:9', resultJson: 'null' }]);
+  });
+
+  it('shutdown() drops the veto hooks — a dead delegate must not approve a promo code', async () => {
+    await AppDNA.configure('adn_test_key');
+    AppDNA.paywall.setDelegate({
+      onPaywallPresented: () => undefined,
+      onPaywallDismissed: () => undefined,
+      onPaywallAction: () => undefined,
+      onPaywallPurchaseStarted: () => undefined,
+      onPaywallPurchaseCompleted: () => undefined,
+      onPaywallPurchaseFailed: () => undefined,
+      onPaywallRestoreStarted: () => undefined,
+      onPaywallRestoreCompleted: () => undefined,
+      onPaywallRestoreFailed: () => undefined,
+      onPostPurchaseDeepLink: () => undefined,
+      onPostPurchaseNextStep: () => undefined,
+      onPromoCodeSubmit: async () => true,
+    });
+
+    await AppDNA.shutdown();
+
+    const listener = (listenersByEvent.get('onHostCallback') ?? [])[0]!;
+    listener({ callbackId: 'e1:11', hook: 'onPromoCodeSubmit', argsJson: JSON.stringify({ code: 'FREE' }) });
+    await new Promise((r) => setImmediate(r));
+
+    // `true` here would mean a shut-down SDK's delegate accepted an unvalidated promo code.
+    expect(replies).toEqual([{ callbackId: 'e1:11', resultJson: 'null' }]);
+  });
+});
+
+describe('the veto dispatcher exists as soon as configure() has run', () => {
+  it('configure() installs the onHostCallback listener even with NO delegate registered', async () => {
+    expect(countListeners('onHostCallback')).toBe(0);
+
+    await AppDNA.configure('adn_test_key');
+
+    // Native registers its veto forwarders during configure and awaits an answer on every step
+    // render. Nobody listening here means native waits out the whole timeout, every time.
+    expect(countListeners('onHostCallback')).toBe(1);
+  });
+
+  it('an unregistered hook is answered "no opinion" immediately, not left to time out', async () => {
+    await AppDNA.configure('adn_test_key');
+
+    const listener = (listenersByEvent.get('onHostCallback') ?? [])[0]!;
+    listener({ callbackId: 'e1:7', hook: 'onBeforeStepAdvance', argsJson: JSON.stringify({ flowId: 'f' }) });
+    await new Promise((r) => setImmediate(r));
+
+    // `"null"` is the wire form of "apply your own default" — the same thing a timeout means, minus
+    // the five seconds.
+    expect(replies).toEqual([{ callbackId: 'e1:7', resultJson: 'null' }]);
+  });
+});

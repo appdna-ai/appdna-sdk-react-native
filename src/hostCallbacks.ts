@@ -101,10 +101,14 @@ export function installHostCallbackDispatcher(): void {
 /** Installed once. Never removed — the module owns its own teardown. */
 function ensureDispatcher(): void {
   if (dispatcherInstalled) return;
-  dispatcherInstalled = true;
+  // Set the flag only AFTER the subscription succeeds. `addNativeListener` throws on a missing module
+  // (the legacy bridge), and flipping the flag first would leave the module believing a dispatcher
+  // exists that does not — so every later `registerHostCallback` short-circuits and every native veto
+  // waits out the full 5 s timeout. That is precisely the stall this function was added to prevent.
   addNativeListener<HostCallbackEvent>('onHostCallback', (event) => {
     void dispatch(event);
   });
+  dispatcherInstalled = true;
 }
 
 /** Register (or replace) the handler for one hook. A later `setDelegate` overwrites the earlier one. */
@@ -113,9 +117,43 @@ export function registerHostCallback(hook: HostCallbackHook, handler: HostCallba
   ensureDispatcher();
 }
 
+/**
+ * The veto hooks each delegate slot owns. `setDelegate` must clear its slot's hooks before installing
+ * the new delegate's, because the hooks are registered CONDITIONALLY — `if (delegate.onBeforeStepAdvance)`.
+ *
+ * 🔴 Without this: `onboarding.setDelegate(A)` where A implements `onBeforeStepAdvance`, then a remount
+ * calls `setDelegate(B)` where B does NOT — the `if` never fires, B never overwrites the entry, and
+ * **A keeps vetoing every step advance from an unmounted screen, forever**. The same for
+ * `onPromoCodeSubmit`, `shouldShowMessage`, `shouldOpen` and `onScreenAction`. Replacing a delegate has
+ * to mean replacing ALL of it; the event listeners were only half the delegate.
+ */
+export const HOOKS_BY_DELEGATE_SLOT: Readonly<Record<string, readonly HostCallbackHook[]>> = {
+  onboarding: ['onBeforeStepAdvance', 'onBeforeStepRender', 'onElementInteraction', 'onPermissionRequest'],
+  paywall: ['onPromoCodeSubmit'],
+  inAppMessages: ['shouldShowMessage'],
+  screens: ['onScreenAction'],
+  deepLinks: ['shouldOpen'],
+};
+
+/** Drop every veto hook owned by one delegate slot. Called by `setDelegate` before it installs. */
+export function clearHostCallbacksForSlot(slot: string): void {
+  for (const hook of HOOKS_BY_DELEGATE_SLOT[slot] ?? []) handlers.delete(hook);
+}
+
 /** Drop a hook. Native then applies its per-hook default, exactly as if no host had ever registered. */
 export function unregisterHostCallback(hook: HostCallbackHook): void {
   handlers.delete(hook);
+}
+
+/**
+ * Drop every hook. Called from `shutdown()`.
+ *
+ * 🔴 `shutdown()` used to drop the delegates' EVENT listeners and leave the veto handlers in place, so
+ * a paywall delegate whose `onPromoCodeSubmit` returned `true` kept accepting promo codes after the
+ * SDK had been shut down — a dead delegate still approving revenue decisions.
+ */
+export function clearHostCallbacks(): void {
+  handlers.clear();
 }
 
 /** Test seam: forget every hook and the dispatcher, so a suite starts from a known state. */

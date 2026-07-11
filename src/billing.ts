@@ -55,6 +55,18 @@ function ensureEntitlementObserver(): void {
 }
 
 /** Test seam: forget that the observer was started, so a suite can assert the first-listener call. */
+/**
+ * Forget that the observer was started. Called by `shutdown()`.
+ *
+ * The latch below is what stops a re-subscribe storm — but it also meant that after
+ * `shutdown()` → `configure()`, `startEntitlementObserver()` was never re-sent to native and
+ * `onEntitlementsChanged` stayed dead for the rest of the process. The JS mirror of the Android
+ * native defect where the same subscription was dropped.
+ */
+export function resetEntitlementObserver(): void {
+  entitlementObserverStarted = false;
+}
+
 export function __resetEntitlementObserverForTesting(): void {
   entitlementObserverStarted = false;
 }

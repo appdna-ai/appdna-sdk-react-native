@@ -95,11 +95,21 @@ public final class AppdnaScreenSlotHostView: UIView {
         }
         hostingController = nil
         lastReported = .zero
-        // 🔴 `slotName` MUST be cleared too. Fabric RECYCLES component views: on unmount the view goes
-        // into the recycle pool with its host torn down, and on the next mount the pooled instance is
-        // handed back and `updateProps` calls `setSlotName` with the SAME name — whose `guard name !=
-        // slotName` then early-returns, `render()` never runs, and the slot stays permanently blank.
-        // Navigating away from a screen and back is enough to reproduce it.
+    }
+
+    /// Prepare a RECYCLED view for reuse. Called from the component view's `prepareForRecycle`.
+    ///
+    /// The name must be cleared HERE and nowhere else. Fabric recycles component views: on unmount the
+    /// view goes into the pool, and on the next mount `updateProps` calls `setSlotName` with the SAME
+    /// name — whose `guard name != slotName` would early-return, `render()` would never run, and the
+    /// slot would stay permanently blank.
+    ///
+    /// It must NOT be folded into `teardownHost()`, which `render()` itself calls first: clearing the
+    /// name there wipes it a line before the SwiftUI view is built from it, and EVERY slot renders
+    /// empty — first mount included. (That is not hypothetical; it is what the first version of this
+    /// fix did.)
+    @objc public func prepareForReuse() {
+        teardownHost()
         slotName = ""
     }
 

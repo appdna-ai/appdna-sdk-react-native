@@ -1,5 +1,6 @@
 import { TurboModuleRegistry, type EventSubscription } from 'react-native';
 import type { Spec } from './specs/NativeAppdnaModule';
+import { clearHostCallbacksForSlot } from './hostCallbacks';
 
 /**
  * SPEC-070-B D-q2 / D-c / §20 — the single place the native module is resolved.
@@ -129,7 +130,23 @@ export function setDelegateListeners(
   for (const sub of delegateSubscriptions.get(slot) ?? []) {
     sub.remove();
   }
-  delegateSubscriptions.set(slot, install());
+  // The VETO hooks are the other half of the delegate, and they are registered conditionally — so a
+  // new delegate that omits an optional hook would never overwrite the old delegate's, and the old one
+  // would keep answering vetoes from an unmounted screen.
+  clearHostCallbacksForSlot(slot);
+  delegateSubscriptions.set(slot, []);
+
+  // If `install` throws part-way — a drifted event name on the 3rd of 11 subscriptions, say — the
+  // subscriptions it already made would otherwise be unreachable and unremovable. Keep them as we go.
+  const created: EventSubscription[] = [];
+  try {
+    for (const sub of install()) created.push(sub);
+  } catch (error) {
+    for (const sub of created) sub.remove();
+    delegateSubscriptions.set(slot, []);
+    throw error;
+  }
+  delegateSubscriptions.set(slot, created);
 }
 
 /** Drop every delegate's listeners — `shutdown()`, and the test seam below. */

@@ -5,7 +5,11 @@ import {
   setDelegateListeners,
   removeAllDelegateListeners,
 } from './nativeModule';
-import { registerHostCallback, installHostCallbackDispatcher } from './hostCallbacks';
+import {
+  registerHostCallback,
+  installHostCallbackDispatcher,
+  clearHostCallbacks,
+} from './hostCallbacks';
 import type {
   WebEntitlement,
   DeferredDeepLink,
@@ -13,7 +17,7 @@ import type {
   AppDNAEnvironment,
   AppDNAOptions,
 } from './types';
-import { AppDNABilling } from './billing';
+import { AppDNABilling, resetEntitlementObserver } from './billing';
 import type { Entitlement, PurchaseResult, ProductInfo } from './billing';
 import type {
   AppDNAOnboardingDelegate,
@@ -641,6 +645,13 @@ export class AppDNA {
     // Every delegate's listeners go too. They are subscriptions on a process-global native emitter;
     // leaving them attached across shutdown→configure is how one event reaches N stale delegates.
     removeAllDelegateListeners();
+    // …and its VETO handlers. Dropping the listeners and keeping the hooks left a paywall delegate
+    // whose `onPromoCodeSubmit` returned true still ACCEPTING PROMO CODES after shutdown — a dead
+    // delegate approving revenue decisions.
+    clearHostCallbacks();
+    // The billing facade latches "observer started" and never retries, so without this reset a
+    // shutdown → configure cycle leaves `onEntitlementsChanged` dead for the rest of the process.
+    resetEntitlementObserver();
     return AppdnaModule.shutdown();
   }
 

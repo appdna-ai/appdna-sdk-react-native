@@ -81,7 +81,7 @@ using namespace facebook::react;
 // UIHostingController (E6/E11 on the view side).
 - (void)prepareForRecycle
 {
-  [_host teardownHost];
+  [_host prepareForReuse];
   [super prepareForRecycle];
 }
 
