@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { AppDNA, AppDNAScreenSlot } from '@appdna-ai/react-native-sdk';
+import { AppDNA, AppDNAScreenSlot, AppDNABilling } from '@appdna-ai/react-native-sdk';
 
 /**
  * The SDK key arrives as an initial prop, put there by the native host from a LAUNCH ARGUMENT
@@ -22,10 +22,13 @@ type Props = {
   /** Real content ids, injected as launch args — see AppDelegate.mm. Never committed. */
   onboardingId?: string;
   paywallId?: string;
+  paywall2Id?: string;
   surveyId?: string;
+  /** The event that triggers an in-app message in this app's console config. */
+  messageEvent?: string;
 };
 
-export default function App({ apiKey, onboardingId, paywallId, surveyId }: Props) {
+export default function App({ apiKey, onboardingId, paywallId, paywall2Id, surveyId, messageEvent }: Props) {
   const [status, setStatus] = useState(apiKey ? 'Configuring…' : 'No API key — pass -appdnaApiKey');
   const [log, setLog] = useState<string[]>([]);
   const [diagnostics, setDiagnostics] = useState('');
@@ -69,6 +72,64 @@ export default function App({ apiKey, onboardingId, paywallId, surveyId }: Props
           return true;
         },
       });
+
+      // ALL NINE delegates. Each callback appends a line, so a delegate that native never invokes is
+      // visible as a missing line rather than inferred from a passing await. Three of these were
+      // silently dead on Android until this pass: lifecycle, web-entitlement, and config-changed.
+      AppDNA.paywall.setDelegate({
+        onPaywallPresented: (id) => append(`paywall presented: ${id}`),
+        onPaywallDismissed: (id) => append(`paywall dismissed: ${id}`),
+        onPaywallAction: (id, action) => append(`paywall action: ${id} / ${action}`),
+        onPaywallPurchaseCompleted: (id, productId) => append(`paywall purchase: ${id} / ${productId}`),
+        onPaywallPurchaseFailed: (id, error) => append(`paywall purchase failed: ${id} / ${error}`),
+        onPaywallRestoreCompleted: (products) => append(`paywall restore: ${products.length} product(s)`),
+        onPaywallPurchaseStarted: (id, productId) => append(`paywall purchase started: ${id} / ${productId}`),
+        onPaywallRestoreStarted: (id) => append(`paywall restore started: ${id}`),
+        onPaywallRestoreFailed: (id, error) => append(`paywall restore failed: ${id} / ${String(error)}`),
+        onPostPurchaseDeepLink: (url) => append(`post-purchase deep link: ${url}`),
+        onPostPurchaseNextStep: (step) => append(`post-purchase next step: ${step}`),
+      });
+
+      AppDNA.surveys.setDelegate({
+        onSurveyPresented: (id) => append(`survey presented: ${id}`),
+        onSurveyCompleted: (id, responses) => append(`survey completed: ${id} — ${responses.length} response(s)`),
+        onSurveyDismissed: (id) => append(`survey dismissed: ${id}`),
+      });
+
+      AppDNA.inAppMessages.setDelegate({
+        onMessageShown: (id, trigger) => append(`message shown: ${id} (trigger=${trigger})`),
+        onMessageAction: (id, action) => append(`message action: ${id} / ${action}`),
+        onMessageDismissed: (id) => append(`message dismissed: ${id}`),
+        // A VETO — native awaits this before showing. Allowing, and logging that we were asked.
+        shouldShowMessage: (id) => { append(`veto shouldShowMessage(${id}) → allow`); return true; },
+      });
+
+      AppDNA.push.setDelegate({
+        onPushTokenRegistered: (token) => append(`push token: ${token.slice(0, 12)}…`),
+        onPushReceived: (_payload, inForeground) => append(`push received (foreground=${inForeground})`),
+        onPushTapped: () => append('push tapped'),
+      });
+
+      AppDNA.deepLinks.setDelegate({
+        onDeepLinkReceived: (url) => append(`deep link: ${url}`),
+        shouldOpen: (url) => { append(`veto shouldOpen(${url}) → allow`); return true; },
+      });
+
+      AppDNA.lifecycle.setDelegate({
+        onSdkRuntimeLocked: (reason) => append(`SDK LOCKED: ${reason}`),
+        onSdkRuntimeUnlocked: () => append('SDK unlocked'),
+      });
+
+      AppDNABilling.setDelegate({
+        onPurchaseCompleted: (productId) => append(`purchase completed: ${productId}`),
+        onPurchaseFailed: (productId, error) => append(`purchase failed: ${productId} / ${error}`),
+        onEntitlementsChanged: (ents) => append(`entitlements changed: ${ents.length}`),
+        onRestoreCompleted: (products) => append(`restore completed: ${products.length}`),
+      });
+
+      AppDNA.onWebEntitlementChanged((e) => append(`web entitlement: ${e ? e.status : 'none'}`));
+      AppDNA.remoteConfig.onChanged(() => append('remote config changed'));
+      AppDNA.features.onChanged(() => append('feature flags changed'));
 
       await AppDNA.configure(apiKey);
       if (cancelled) return;
@@ -119,8 +180,21 @@ export default function App({ apiKey, onboardingId, paywallId, surveyId }: Props
             onPress={async () => { await AppDNA.paywall.present(paywallId ?? 'default'); append('presentPaywall dispatched'); }}
           />
           <Button
+            label="Present paywall 2"
+            onPress={async () => { await AppDNA.paywall.present(paywall2Id ?? 'default'); append('presentPaywall2 dispatched'); }}
+          />
+          <Button
             label="Show survey"
             onPress={async () => { await AppDNA.surveys.present(surveyId ?? 'default'); append('showSurvey dispatched'); }}
+          />
+          <Button
+            label="Trigger in-app message"
+            onPress={() => {
+              // In-app messages are TRIGGERED by an event, not presented by id — the console binds a
+              // message to an event name. Tracking it is the only way a host asks for one.
+              AppDNA.track(messageEvent ?? 'rn_e2e_message_trigger');
+              append(`track(${messageEvent ?? 'rn_e2e_message_trigger'}) — awaiting message`);
+            }}
           />
           <Button
             label="Session round-trip"
