@@ -63,10 +63,26 @@ function encodeResult(value: unknown): string {
   }
 }
 
+/**
+ * The reply that means "this host registered NO handler for this hook" — as opposed to "the host
+ * looked at it and had no opinion". Native treats both as "apply your default" everywhere except one
+ * place, and that place is why the distinction has to exist:
+ *
+ * Native gates its AUTH actions (`email_login`, `login`, `request_otp`, …) on delegate presence — no
+ * delegate means "nobody can sign this user in", so it stays on the step and shows an error. But a
+ * WRAPPER always attaches a delegate at `configure()` (native starts emitting during configure, so it
+ * must), and that delegate answers `.proceed` when JS has nothing to say. The result: React Native
+ * ADVANCED PAST THE CREDENTIAL STEP WITHOUT AUTHENTICATING ANYONE, while native stayed put. The
+ * delegate-presence check is a proxy for "will someone handle this", and for wrappers the proxy lies.
+ *
+ * This sentinel gives the wrapper's forwarder the fact it actually needs.
+ */
+const UNHANDLED = JSON.stringify({ __appdna_unhandled: true });
+
 async function dispatch(event: HostCallbackEvent): Promise<void> {
   const handler = handlers.get(event.hook as HostCallbackHook);
 
-  let resultJson = NO_OPINION;
+  let resultJson = handler ? NO_OPINION : UNHANDLED;
   if (handler) {
     try {
       const args = parseNativeJson<Record<string, unknown>>(event.argsJson);

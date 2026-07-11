@@ -89,7 +89,10 @@ describe('host-callback dispatcher', () => {
 
     await fireHostCallback('onPermissionRequest', { permissionType: 'notifications' });
 
-    expect(mockReplies).toEqual([{ callbackId: 'e1:1', resultJson: 'null' }]);
+    // An unregistered hook now says so explicitly — see UNHANDLED in hostCallbacks.ts. Native
+    // maps it to the same per-hook default as `null` everywhere except an AUTH action, where
+    // "nobody is here" must block the advance rather than proceed past unauthenticated credentials.
+    expect(mockReplies).toEqual([{ callbackId: 'e1:1', resultJson: '{"__appdna_unhandled":true}' }]);
   });
 
   it('replies "null" when the hook throws, rather than hanging the native surface', async () => {
@@ -130,7 +133,10 @@ describe('host-callback dispatcher', () => {
 
     await fireHostCallback('shouldShowMessage', { messageId: 'welcome' });
 
-    expect(mockReplies).toEqual([{ callbackId: 'e1:1', resultJson: 'null' }]);
+    // An unregistered hook now says so explicitly — see UNHANDLED in hostCallbacks.ts. Native
+    // maps it to the same per-hook default as `null` everywhere except an AUTH action, where
+    // "nobody is here" must block the advance rather than proceed past unauthenticated credentials.
+    expect(mockReplies).toEqual([{ callbackId: 'e1:1', resultJson: '{"__appdna_unhandled":true}' }]);
   });
 
   it('installs exactly one native listener no matter how many hooks register', () => {

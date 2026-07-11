@@ -102,6 +102,14 @@ internal class OnboardingForwarder(
                 stepData?.let { put("stepData", it) }
             },
         )
+        // Native gates auth actions on delegate presence — no delegate means nobody can sign the user
+        // in, so it stays on the step and shows an error. But this wrapper ALWAYS attaches a delegate at
+        // configure(), so that gate never fires for RN, and a JS host with no `onBeforeStepAdvance`
+        // used to get `.proceed` — advancing PAST THE CREDENTIAL STEP WITHOUT AUTHENTICATING ANYONE.
+        // The delegate-presence check is a proxy for "will someone handle this"; for a wrapper it lies.
+        if (AppdnaVetoDecoder.isUnhandled(reply) && isAuthAction(stepData)) {
+            return StepAdvanceResult.Block(AUTH_UNAVAILABLE_MESSAGE)
+        }
         return AppdnaVetoDecoder.stepAdvanceResult(reply)
     }
 
@@ -375,6 +383,23 @@ internal class InitForwarder(private val emitter: AppdnaEventEmitter) : AppDNAIn
     }
 }
 
+/**
+ * The actions that need the HOST to perform a side effect the SDK cannot: sign in, register, send an
+ * OTP. Mirrors `AUTH_ACTIONS_REQUIRING_DELEGATE` in the core's OnboardingActivity — kept in step by
+ * `check:auth-action-parity`.
+ */
+private val AUTH_ACTIONS = setOf(
+    "login", "register", "reset_password", "magic_link", "verify_email", "resend_verification",
+    "enable_biometric", "email_login", "request_otp", "verify_otp", "logout", "change_password",
+    "set_new_password", "delete_account", "update_profile",
+)
+
+/** The same copy native shows. A dead button is worse than a refusal; say why nothing happened. */
+internal const val AUTH_UNAVAILABLE_MESSAGE = "Sign-in isn't available right now. Please try again later."
+
+internal fun isAuthAction(stepData: Map<String, Any>?): Boolean =
+    (stepData?.get("action") as? String) in AUTH_ACTIONS
+
 // ── Reply decoding ───────────────────────────────────────────────────────────
 
 /**
@@ -387,6 +412,10 @@ internal class InitForwarder(private val emitter: AppdnaEventEmitter) : AppDNAIn
 internal object AppdnaVetoDecoder {
 
     /** `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `Proceed`. */
+    /** Did JS reply "I have no handler for this hook"? See `UNHANDLED` in hostCallbacks.ts. */
+    fun isUnhandled(reply: Any?): Boolean =
+        (reply as? Map<*, *>)?.get("__appdna_unhandled") == true
+
     fun stepAdvanceResult(reply: Any?): StepAdvanceResult {
         val map = reply as? Map<*, *> ?: return StepAdvanceResult.Proceed
         return when (map["type"] as? String ?: "proceed") {

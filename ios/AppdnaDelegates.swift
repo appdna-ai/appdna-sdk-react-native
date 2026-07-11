@@ -82,7 +82,18 @@ final class OnboardingForwarder: NSObject, AppDNAOnboardingDelegate {
             "responses": responses,
         ]
         if let stepData { args["stepData"] = stepData }
-        return AppdnaVetoDecoder.stepAdvanceResult(await invoker.invoke("onBeforeStepAdvance", args))
+        let reply = await invoker.invoke("onBeforeStepAdvance", args)
+
+        // Native gates the AUTH actions on delegate presence — no delegate means nobody can sign the
+        // user in, so it stays on the step and shows an error. But this wrapper ALWAYS attaches a
+        // delegate at configure() (native emits during configure, so it must), and a JS host with no
+        // `onBeforeStepAdvance` used to get `.proceed` — ADVANCING PAST THE CREDENTIAL STEP WITHOUT
+        // AUTHENTICATING ANYONE, while a native host stayed put. Delegate-presence is a proxy for
+        // "will someone handle this"; for a wrapper the proxy lies, so ask JS instead.
+        if AppdnaVetoDecoder.isUnhandled(reply), AppdnaAuthActions.isAuthAction(stepData) {
+            return .block(message: AppdnaAuthActions.unavailableMessage)
+        }
+        return AppdnaVetoDecoder.stepAdvanceResult(reply)
     }
 
     func onBeforeStepRender(
@@ -364,7 +375,30 @@ final class LifecycleForwarder: NSObject, AppDNALifecycleDelegate {
  * The wire shapes are identical to Flutter's, so a host porting a veto handler between the two SDKs
  * does not have to relearn them.
  */
+/// The actions that need the HOST to do something the SDK cannot: sign in, register, send an OTP.
+/// Mirrors `AuthActionPolicy.delegateRequiredActions` in the core renderer.
+enum AppdnaAuthActions {
+    static let all: Set<String> = [
+        "login", "register", "reset_password", "magic_link", "verify_email", "resend_verification",
+        "enable_biometric", "email_login", "request_otp", "verify_otp", "logout", "change_password",
+        "set_new_password", "delete_account", "update_profile",
+    ]
+
+    /// The same copy native shows. A dead button is worse than a refusal; say why nothing happened.
+    static let unavailableMessage = "Sign-in isn't available right now. Please try again later."
+
+    static func isAuthAction(_ stepData: [String: Any]?) -> Bool {
+        guard let action = stepData?["action"] as? String else { return false }
+        return all.contains(action)
+    }
+}
+
 enum AppdnaVetoDecoder {
+    /// Did JS reply "I have no handler for this hook"? See `UNHANDLED` in hostCallbacks.ts.
+    static func isUnhandled(_ reply: Any?) -> Bool {
+        (reply as? [String: Any])?["__appdna_unhandled"] as? Bool == true
+    }
+
 
     /// `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `.proceed`.
     static func stepAdvanceResult(_ reply: Any?) -> StepAdvanceResult {

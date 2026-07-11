@@ -148,7 +148,7 @@ describe('a delegate swap replaces the VETO HOOKS too, not just the listeners', 
 
     // If the swap left the first delegate's hook in place, it answers `{"type":"block",...}` — from a
     // screen that has been unmounted — and every step advance is vetoed forever.
-    expect(replies).toEqual([{ callbackId: 'e1:9', resultJson: 'null' }]);
+    expect(replies).toEqual([{ callbackId: 'e1:9', resultJson: '{"__appdna_unhandled":true}' }]);
   });
 
   it('shutdown() drops the veto hooks — a dead delegate must not approve a promo code', async () => {
@@ -175,7 +175,7 @@ describe('a delegate swap replaces the VETO HOOKS too, not just the listeners', 
     await new Promise((r) => setImmediate(r));
 
     // `true` here would mean a shut-down SDK's delegate accepted an unvalidated promo code.
-    expect(replies).toEqual([{ callbackId: 'e1:11', resultJson: 'null' }]);
+    expect(replies).toEqual([{ callbackId: 'e1:11', resultJson: '{"__appdna_unhandled":true}' }]);
   });
 });
 
@@ -190,15 +190,38 @@ describe('the veto dispatcher exists as soon as configure() has run', () => {
     expect(countListeners('onHostCallback')).toBe(1);
   });
 
-  it('an unregistered hook is answered "no opinion" immediately, not left to time out', async () => {
+  it('an UNREGISTERED hook is answered immediately, and says it is unregistered', async () => {
     await AppDNA.configure('adn_test_key');
 
     const listener = (listenersByEvent.get('onHostCallback') ?? [])[0]!;
     listener({ callbackId: 'e1:7', hook: 'onBeforeStepAdvance', argsJson: JSON.stringify({ flowId: 'f' }) });
     await new Promise((r) => setImmediate(r));
 
-    // `"null"` is the wire form of "apply your own default" — the same thing a timeout means, minus
-    // the five seconds.
-    expect(replies).toEqual([{ callbackId: 'e1:7', resultJson: 'null' }]);
+    // NOT `"null"`. "I have no handler" and "I looked and have no opinion" are the same for seven of
+    // the eight hooks — but for an AUTH action they are opposites: no handler means nobody can sign
+    // this user in, and the wrapper must block the advance rather than let native's `.proceed` default
+    // walk the user past the credential step unauthenticated. The reply is answered at once either
+    // way, so the 5 s stall stays fixed.
+    expect(replies).toEqual([{ callbackId: 'e1:7', resultJson: '{"__appdna_unhandled":true}' }]);
+  });
+
+  it('a REGISTERED hook that returns nothing still means "no opinion", not "unhandled"', async () => {
+    await AppDNA.configure('adn_test_key');
+    AppDNA.onboarding.setDelegate({
+      onOnboardingStarted: () => undefined,
+      onOnboardingStepChanged: () => undefined,
+      onOnboardingCompleted: () => undefined,
+      onOnboardingDismissed: () => undefined,
+      onPermissionResult: () => undefined,
+      onBeforeStepAdvance: async () => undefined as never,
+    });
+
+    const listener = (listenersByEvent.get('onHostCallback') ?? [])[0]!;
+    listener({ callbackId: 'e1:8', hook: 'onBeforeStepAdvance', argsJson: JSON.stringify({ flowId: 'f' }) });
+    await new Promise((r) => setImmediate(r));
+
+    // The host looked at it and shrugged. That IS an answer, and it must not be mistaken for "there is
+    // nobody here" — otherwise a host that deliberately proceeds on an auth step would be blocked.
+    expect(replies).toEqual([{ callbackId: 'e1:8', resultJson: 'null' }]);
   });
 });
