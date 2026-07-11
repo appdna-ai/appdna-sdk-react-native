@@ -52,6 +52,19 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
     private var entitlementListener: ((List<ai.appdna.sdk.billing.Entitlement>) -> Unit)? = null
 
     /**
+     * Held so `invalidate()` can detach them. Both capture this bridge-scoped module STRONGLY, and the
+     * SDK singleton outlives every reload — so an un-detached listener leaks the module and its
+     * ReactApplicationContext, and the stale copies keep emitting into a torn-down TurboModule.
+     *
+     * They are also the reason `registerDelegates` must be idempotent: native's `configure()` refuses a
+     * second call, but this wrapper's registration ran unconditionally after it, so a host that called
+     * configure() twice got TWO config collectors and TWO web-entitlement listeners — every change
+     * delivered twice, forever.
+     */
+    private var webEntitlementListener: ((ai.appdna.sdk.webentitlements.WebEntitlement?) -> Unit)? = null
+    private var configUpdatesJob: kotlinx.coroutines.Job? = null
+
+    /**
      * P3 — the eight veto hooks and every observe callback are routed by these. Built in
      * [configure], because `vetoTimeout` is a configure option and a forwarder registered before it
      * would use the wrong timer.
@@ -262,8 +275,13 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
     override fun presentPaywall(paywallId: String, context: ReadableMap?, promise: Promise) {
         val activity = reactContext.currentActivity
             ?: return promise.reject("NO_ACTIVITY", "presentPaywall requires a foreground Activity")
+        // Parse on the JS thread — this method's own contract, stated in `configure` above: a
+        // ReadableMap is only valid on the thread the bridge delivered it on. Reading it inside
+        // `runOnUiThread` reads it after this method has RETURNED, on another thread, which is
+        // undefined behaviour and can hand the paywall an empty customData with no error anywhere.
+        val paywallContext = parsePaywallContext(context)
         activity.runOnUiThread {
-            AppDNA.presentPaywall(activity, paywallId, parsePaywallContext(context))
+            AppDNA.presentPaywall(activity, paywallId, paywallContext)
             promise.resolve(null)
         }
     }
@@ -272,8 +290,10 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
     override fun presentPaywallByPlacement(placement: String, context: ReadableMap?, promise: Promise) {
         val activity = reactContext.currentActivity
             ?: return promise.reject("NO_ACTIVITY", "presentPaywallByPlacement requires a foreground Activity")
+        // Same as `presentPaywall`: read the ReadableMap on the thread that delivered it.
+        val paywallContext = parsePaywallContext(context)
         activity.runOnUiThread {
-            AppDNA.presentPaywallByPlacement(activity, placement, parsePaywallContext(context))
+            AppDNA.presentPaywallByPlacement(activity, placement, paywallContext)
             promise.resolve(null)
         }
     }
@@ -557,7 +577,8 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         // `remoteConfig.onChanged` / `features.onChanged` never fired and the facade's `getCached()`
         // snapshot — which refreshes ON this event — stayed frozen until the next cold start while
         // `await remoteConfig.get(key)` returned the new value.
-        scope.launch {
+        configUpdatesJob?.cancel()
+        configUpdatesJob = scope.launch {
             AppDNA.configUpdated.collect {
                 emitter.emit("onRemoteConfigChanged", emptyMap())
                 emitter.emit("onFeatureFlagsChanged", emptyMap())
@@ -566,9 +587,12 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
 
         // The web-entitlement observer, likewise iOS-only until now: a subscription bought on the web
         // and unlocked mid-session updated the UI on iOS and not on Android.
-        AppDNA.onWebEntitlementChanged { entitlement ->
+        webEntitlementListener?.let { AppDNA.removeWebEntitlementListener(it) }
+        val webListener: (ai.appdna.sdk.webentitlements.WebEntitlement?) -> Unit = { entitlement ->
             emitter.emit("onWebEntitlementChanged", mapOf("entitlement" to entitlement?.toMap()))
         }
+        webEntitlementListener = webListener
+        AppDNA.onWebEntitlementChanged(webListener)
 
         // 🔴 `shouldShowMessage` defaults to ALLOW on timeout; `onPromoCodeSubmit` to REJECT. A
         // uniform default here is how a paywall silently starts accepting unvalidated promo codes.
@@ -668,6 +692,10 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         AppDNA.deepLinks.setDelegate(null)
         AppDNA.setInitDelegate(null)
         AppDNA.setLifecycleDelegate(null)
+        webEntitlementListener?.let { AppDNA.removeWebEntitlementListener(it) }
+        webEntitlementListener = null
+        configUpdatesJob?.cancel()
+        configUpdatesJob = null
         AppDNA.inAppMessages.setAsyncShouldShowMessage(null)
         AppDNA.deepLinks.asyncShouldOpen = null
         AppDNA.asyncOnScreenAction = null
