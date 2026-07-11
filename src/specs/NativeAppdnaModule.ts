@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-spec.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 40dd33ff8d31da20dd890d5da60c7be0a63846be
+// Last codegen commit: e77caa56c0afdb8ec33825cc98fd5d0941c4ca7f
 
 import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
@@ -112,6 +112,55 @@ export interface Spec extends TurboModule {
 
   /** Present a survey by id. */
   presentSurvey(surveyId: string): Promise<void>;
+
+  /**
+   * Present a server-driven screen. Resolves false when no view controller / activity was
+   * available to present from — the same contract as presentOnboarding. The RESULT arrives on
+   * `onScreenDismissed`, not here: a screen can be dismissed long after the call resolves.
+   */
+  showScreen(screenId: string): Promise<boolean>;
+
+  /**
+   * Present a multi-screen flow. Resolves false when nothing could present it. The result
+   * arrives on `onFlowCompleted`.
+   */
+  showFlow(flowId: string): Promise<boolean>;
+
+  /** Dismiss the currently presented screen, if any. */
+  dismissScreen(): Promise<void>;
+
+  /**
+   * Render a screen straight from a JSON payload, bypassing remote config. For console preview /
+   * QA, not production.
+   */
+  previewScreen(json: string): Promise<boolean>;
+
+  /**
+   * Let the SDK inject server-driven screens into the host's navigation. Omit `screens` to
+   * intercept all of them.
+   */
+  enableNavigationInterception(screens?: string[]): Promise<void>;
+
+  /** Stop intercepting navigation. */
+  disableNavigationInterception(): Promise<void>;
+
+  /** Store a value for the current session. `valueJson` is JSON-encoded (E2). */
+  setSessionData(key: string, valueJson: string): Promise<void>;
+
+  /** A session value of unknown shape, JSON-encoded (E2). Null when unset. */
+  getSessionData(key: string): Promise<string>;
+
+  /** Drop every session value. */
+  clearSessionData(): Promise<void>;
+
+  /** The traits currently attached to the user, JSON-encoded (E2). */
+  getUserTraits(): Promise<string>;
+
+  /**
+   * The structured location captured by an onboarding location field, JSON-encoded. Null when
+   * that field was never answered.
+   */
+  getLocationData(fieldId: string): Promise<string>;
 
   /** Suppress in-app message display (e.g. during checkout). */
   suppressMessages(suppress: boolean): void;
@@ -228,6 +277,15 @@ export interface Spec extends TurboModule {
 
   /** Android-only: Play Billing is unavailable on this device (N8). */
   readonly onBillingUnavailable: EventEmitter<UnsafeObject>;
+
+  /** A server-driven screen appeared. Payload `{screenId}`. */
+  readonly onScreenPresented: EventEmitter<UnsafeObject>;
+
+  /** A screen closed. Payload `{screenId, result}` — this is where a showScreen() result arrives. */
+  readonly onScreenDismissed: EventEmitter<UnsafeObject>;
+
+  /** A multi-screen flow finished. Payload `{flowId, result}`. */
+  readonly onFlowCompleted: EventEmitter<UnsafeObject>;
 
   readonly onSurveyPresented: EventEmitter<UnsafeObject>;
 

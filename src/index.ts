@@ -18,6 +18,7 @@ import type {
   AppDNASurveyDelegate,
   AppDNADeepLinkDelegate,
   AppDNALifecycleDelegate,
+  AppDNAScreenDelegate,
 } from './generated/delegates';
 
 export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
@@ -46,6 +47,7 @@ export type {
   AppDNASurveyDelegate,
   AppDNADeepLinkDelegate,
   AppDNALifecycleDelegate,
+  AppDNAScreenDelegate,
 } from './generated/delegates';
 
 /**
@@ -456,6 +458,79 @@ export class AppDNA {
         delegate.onSurveyCompleted(data.surveyId, data.responses));
       addNativeListener<{ surveyId: string }>('onSurveyDismissed', (data) =>
         delegate.onSurveyDismissed(data.surveyId));
+    },
+  };
+
+  /**
+   * Session data — values that live for the current session (P8).
+   *
+   * Both natives have shipped this all along; RN never wrapped it, which is why the docs described
+   * `AppDNA.setSessionData` for a method that did not exist. Values cross as JSON (E2), so any
+   * JSON-representable value round-trips.
+   */
+  static session = {
+    /** Store a value. Native rejects a null — "store nothing" is not an operation either SDK has. */
+    set: (key: string, value: unknown): Promise<void> =>
+      AppdnaModule.setSessionData(key, JSON.stringify(value ?? null)),
+    /** Read a value. Resolves `null` when unset. */
+    get: async (key: string): Promise<unknown> =>
+      parseNativeJson<unknown>(await AppdnaModule.getSessionData(key)),
+    clear: (): Promise<void> => AppdnaModule.clearSessionData(),
+  };
+
+  /** The traits currently attached to the user. */
+  static async getUserTraits(): Promise<Record<string, unknown>> {
+    return parseNativeJson<Record<string, unknown>>(await AppdnaModule.getUserTraits());
+  }
+
+  /**
+   * The structured answer to an onboarding location field — `{formatted_address, city, state,
+   * state_code, country, country_code, latitude, longitude, timezone, timezone_offset, postal_code,
+   * raw_query}`. Resolves `null` when that field was never answered.
+   */
+  static async getLocationData(fieldId: string): Promise<Record<string, unknown> | null> {
+    return parseNativeJson<Record<string, unknown> | null>(await AppdnaModule.getLocationData(fieldId));
+  }
+
+  /**
+   * Screens module — server-driven screens and flows (P8, the 9th delegate).
+   *
+   * Distinct from `<AppDNAScreenSlot>`, which embeds a screen INLINE in your own layout. These
+   * PRESENT one over the app, and they are what fire `onScreenPresented`/`onScreenDismissed`/
+   * `onFlowCompleted` — the slot raises nothing.
+   */
+  static screens = {
+    /**
+     * Present a screen. Resolves `false` when there was no view controller / Activity to present
+     * from — the same contract as `presentOnboarding`.
+     *
+     * The RESULT does not come back here. A screen can be dismissed long after this resolves, so it
+     * arrives on `onScreenDismissed` via {@link setDelegate}.
+     */
+    show: (screenId: string): Promise<boolean> => AppdnaModule.showScreen(screenId),
+    /** Present a multi-screen flow. The result arrives on `onFlowCompleted`. */
+    showFlow: (flowId: string): Promise<boolean> => AppdnaModule.showFlow(flowId),
+    dismiss: (): Promise<void> => AppdnaModule.dismissScreen(),
+    /** Render a screen straight from JSON, bypassing remote config. Console preview / QA only. */
+    preview: (json: string): Promise<boolean> => AppdnaModule.previewScreen(json),
+    /** Let the SDK inject screens into your navigation. Omit `screens` to intercept all of them. */
+    enableNavigationInterception: (screens?: string[]): Promise<void> =>
+      AppdnaModule.enableNavigationInterception(screens),
+    disableNavigationInterception: (): Promise<void> => AppdnaModule.disableNavigationInterception(),
+    /**
+     * The 9th delegate. `onScreenAction` is a VETO — native awaits your answer before handling the
+     * action — so it rides the host-callback seam rather than the event channel, where a listener's
+     * return value is discarded. Defaults to allow.
+     */
+    setDelegate: (delegate: AppDNAScreenDelegate): void => {
+      addNativeListener<{ screenId: string }>('onScreenPresented', (data) =>
+        delegate.onScreenPresented(data.screenId));
+      addNativeListener<{ screenId: string; result: Record<string, unknown> }>('onScreenDismissed', (data) =>
+        delegate.onScreenDismissed(data.screenId, data.result));
+      addNativeListener<{ flowId: string; result: Record<string, unknown> }>('onFlowCompleted', (data) =>
+        delegate.onFlowCompleted(data.flowId, data.result));
+      registerHostCallback('onScreenAction', (args) =>
+        delegate.onScreenAction(args.screenId as string, args.action as Record<string, unknown>));
     },
   };
 

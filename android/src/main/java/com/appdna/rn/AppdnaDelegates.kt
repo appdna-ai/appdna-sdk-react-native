@@ -1,6 +1,7 @@
 package com.appdna.rn
 
 import ai.appdna.sdk.AppDNABillingDelegate
+import ai.appdna.sdk.screens.AppDNAScreenDelegate
 import ai.appdna.sdk.AppDNADeepLinkDelegate
 import ai.appdna.sdk.AppDNAInAppMessageDelegate
 import ai.appdna.sdk.AppDNAInitDelegate
@@ -226,6 +227,25 @@ internal class PaywallForwarder(
 }
 
 // ── Surveys, messages, push, billing, deep links, init ───────────────────────
+
+/**
+ * The 9th delegate (P8). `onScreenAction` is deliberately NOT overridden here — it is a VETO and
+ * rides `AppDNA.asyncOnScreenAction` (the host-callback seam), exactly as §18.6 ruled. Implementing
+ * it in both places would ask the host twice and let the two answers disagree.
+ */
+internal class ScreenForwarder(private val emitter: AppdnaEventEmitter) : AppDNAScreenDelegate {
+    override fun onScreenPresented(screenId: String) {
+        emitter.emit("onScreenPresented", mapOf("screenId" to screenId))
+    }
+
+    override fun onScreenDismissed(screenId: String, result: Map<String, Any?>) {
+        emitter.emit("onScreenDismissed", mapOf("screenId" to screenId, "result" to result))
+    }
+
+    override fun onFlowCompleted(flowId: String, result: Map<String, Any?>) {
+        emitter.emit("onFlowCompleted", mapOf("flowId" to flowId, "result" to result))
+    }
+}
 
 internal class SurveyForwarder(private val emitter: AppdnaEventEmitter) : AppDNASurveyDelegate {
     override fun onSurveyPresented(surveyId: String) {

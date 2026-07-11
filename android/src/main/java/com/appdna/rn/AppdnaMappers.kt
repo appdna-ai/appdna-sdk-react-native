@@ -95,4 +95,27 @@ internal object AppdnaMappers {
         put("answer", response.answer)
         response.metadata?.let { put("metadata", it) }
     }
+    /**
+     * P8 — the onboarding location field's structured answer.
+     *
+     * Both natives already declare these keys in snake_case (`formatted_address`, `state_code`, …),
+     * so the two wires agree without a translation layer. Mapping field-by-field rather than
+     * reflecting keeps `postal_code`'s nullability explicit: it is the one optional field, and a
+     * reflective encoder would emit it as `null` on one platform and omit it on the other.
+     */
+    fun map(loc: ai.appdna.sdk.onboarding.LocationData): Map<String, Any?> = mapOf(
+        "formatted_address" to loc.formatted_address,
+        "city" to loc.city,
+        "state" to loc.state,
+        "state_code" to loc.state_code,
+        "country" to loc.country,
+        "country_code" to loc.country_code,
+        "latitude" to loc.latitude,
+        "longitude" to loc.longitude,
+        "timezone" to loc.timezone,
+        "timezone_offset" to loc.timezone_offset,
+        "postal_code" to loc.postal_code,
+        "raw_query" to loc.raw_query,
+    )
+
 }

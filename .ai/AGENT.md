@@ -1,179 +1,90 @@
-# AppDNA React Native SDK (v0.3.0)
+# AppDNA React Native SDK — agent brief
 
-TypeScript SDK for React Native. Thin native module wrapper around the native iOS and Android SDKs. All logic is delegated to the native layer via `NativeModules` and `NativeEventEmitter`.
+A **thin wrapper** (ADR-001) around the native iOS and Android SDKs. It contains API facades, DTOs
+and bridge calls — and no rendering, networking, storage, or business logic. Everything you see on
+screen is drawn by native.
 
----
+> **This file deliberately does NOT restate the API.** The previous version did, and it rotted: it
+> self-labelled `v0.3.0` long after 1.0.x shipped, and it told you the SDK delivers events through
+> `NativeEventEmitter` — which, under the New Architecture, is a channel **nothing writes to** (see
+> #1 below). A hand-copied surface is a second source of truth, and the second one is always the one
+> that lies. Read the real ones instead:
 
-## Public API
+| What | Where | Kept honest by |
+| --- | --- | --- |
+| The method + event surface (source of truth) | `src/lib/sdk-delegates/sdk-methods.ts` (the IR) | — |
+| The public facade a host calls | `src/index.ts` | `pnpm check:rn-facade-parity` |
+| TurboModule spec (codegen'd — do not hand-edit) | `src/specs/NativeAppdnaModule.ts` | `pnpm sdk-codegen --check` |
+| The 9 delegate interfaces (codegen'd) | `src/generated/delegates.ts` | `pnpm sdk-codegen --check` |
+| Public docs | `docs/sdks/react-native/*.mdx` | `pnpm check:rn-docs-api` |
+| Current version | `package.json` | `pnpm check:publishable-version` |
 
-### Initialization
-
-- `AppDNA.configure(apiKey: string, env: AppDNAEnvironment = 'production', options?: AppDNAOptions): Promise<void>` -- Initialize the SDK. Call once at app startup. Delegates to native `AppDNA.configure()`.
-- `AppDNA.onReady(): Promise<void>` -- Returns a Promise that resolves when the SDK is fully initialized (config fetched, managers ready).
-
-### Identity
-
-- `AppDNA.identify(userId: string, traits?: Record<string, unknown>): Promise<void>` -- Link the anonymous device to a known user.
-- `AppDNA.reset(): Promise<void>` -- Clear user identity (keeps anonymous ID).
-
-### Events
-
-- `AppDNA.track(event: string, properties?: Record<string, unknown>): Promise<void>` -- Track a custom event.
-- `AppDNA.flush(): Promise<void>` -- Force flush all queued events.
-
-### Remote Config
-
-- `AppDNA.getRemoteConfig(key: string): Promise<unknown>` -- Get a remote config value by key.
-- `AppDNA.isFeatureEnabled(flag: string): Promise<boolean>` -- Check if a feature flag is enabled.
-
-### Experiments
-
-- `AppDNA.getExperimentVariant(experimentId: string): Promise<string | null>` -- Get the variant assignment for an experiment.
-- `AppDNA.isInVariant(experimentId: string, variantId: string): Promise<boolean>` -- Check if the user is in a specific variant.
-- `AppDNA.getExperimentConfig(experimentId: string, key: string): Promise<unknown>` -- Get experiment config value.
-
-### Paywalls
-
-- `AppDNA.presentPaywall(id: string, context?: PaywallContext): Promise<void>` -- Present a paywall.
-
-### Onboarding
-
-- `AppDNA.presentOnboarding(flowId: string): Promise<void>` -- Present an onboarding flow by ID.
-
-### Push Notifications
-
-- `AppDNA.setPushToken(token: string): Promise<void>` -- Set push token (APNS hex string on iOS, FCM token on Android).
-- `AppDNA.setPushPermission(granted: boolean): Promise<void>` -- Report push permission status.
-
-### Web Entitlements (v0.3)
-
-- `AppDNA.getWebEntitlement(): Promise<WebEntitlement | null>` -- Get the current web subscription entitlement.
-- `AppDNA.onWebEntitlementChanged(callback: (entitlement: WebEntitlement | null) => void): () => void` -- Listen for web entitlement changes. Returns an unsubscribe function.
-- `AppDNA.checkDeferredDeepLink(): Promise<DeferredDeepLink | null>` -- Check for a deferred deep link on first launch.
-
-### Privacy
-
-- `AppDNA.setConsent(analytics: boolean): Promise<void>` -- Set analytics consent.
-
-### Lifecycle
-
-- `AppDNA.shutdown(): Promise<void>` -- Shut down the SDK. Android delegates to `AppDNA.shutdown()`; iOS is a no-op.
-- `AppDNA.getSdkVersion(): Promise<string>` -- Get the native SDK version string.
-
-### Configuration Options (`AppDNAOptions`)
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `flushInterval` | `number?` | 30 | Auto flush interval in seconds |
-| `batchSize` | `number?` | 20 | Events per flush batch |
-| `configTTL` | `number?` | 3600 | Remote config cache TTL in seconds |
-| `logLevel` | `AppDNALogLevel?` | `'warning'` | Log verbosity (none/error/warning/info/debug) |
-| `billingProvider` | `AppDNABillingProvider?` | `'storeKit2'` | Billing provider (iOS only: storeKit2/revenueCat/none) |
+`check:rn-facade-parity` asserts the IR, the Kotlin module, the Swift impl, the ObjC++ adapter, the
+TS spec and the facade all agree **in both directions**. So "it is in the facade" transitively means
+"it is implemented everywhere". That is the only claim about the API worth trusting.
 
 ---
 
-## TypeScript Types
+## The five things that will bite you
 
-### `WebEntitlement`
-```typescript
-interface WebEntitlement {
-  isActive: boolean;
-  planName?: string;
-  priceId?: string;
-  interval?: string;
-  status: 'active' | 'trialing' | 'past_due' | 'canceled';
-  currentPeriodEnd?: number;
-  trialEnd?: number;
-}
-```
+**1. The New Architecture is required, not preferred.**
+The module resolves via `TurboModuleRegistry.get`, and native emits through the codegen'd
+`EventEmitter<T>` **spec properties**. On the legacy bridge the module still *resolves* — so every
+method appears to work — but no emitter property exists, so **every listener silently never fires**.
+`src/nativeModule.ts` therefore refuses the legacy bridge *by name* rather than letting it look
+healthy. `new NativeEventEmitter(module).addListener(...)` subscribes to nothing. Do not bring it
+back.
 
-### `DeferredDeepLink`
-```typescript
-interface DeferredDeepLink {
-  screen: string;
-  params: Record<string, string>;
-  visitorId: string;
-}
-```
+**2. Vetoes are not events.**
+Eight hooks are vetoes: native *awaits your answer* before acting. A listener's return value is
+discarded, so a veto cannot ride the event channel — they go through `hostCallbacks.ts` →
+`respondToHostCallback`. Timeout defaults are **per-hook**, and one is not like the others:
+`onPromoCodeSubmit` defaults to **reject**, the other seven to allow. A uniform default is how a
+paywall starts accepting unvalidated promo codes.
 
-### `PaywallContext`
-```typescript
-interface PaywallContext {
-  placement?: string;
-  customData?: Record<string, unknown>;
-}
-```
+**3. `framework` is injected by native, never by the host.**
+The bridge stamps `react_native` (underscore) inside `parseOptions`. It is not on the public
+`AppDNAOptions` and must not be — a host must not be able to set, spoof, or omit its own
+attribution. The envelope schema is `.catch('native')`, so a wrong tag does not error, is not
+logged, and is not metered. It just quietly lies in BigQuery.
 
-### `AppDNAEnvironment`
-```typescript
-type AppDNAEnvironment = 'production' | 'staging';
-```
+**4. Threading (E10).**
+TurboModule method bodies run on the **JS thread** on Android, and `getMethodQueue()` is ignored.
+Present-style calls dispatch to the **UI thread** (native's own main-looper check then takes a
+latch-free path). `configure()` dispatches **off** the JS thread because it opens SQLite. But
+`parseOptions` stays **on** it — a `ReadableMap` is only valid on the thread the bridge delivered it
+on.
 
----
-
-## Native Events
-
-| Event Name | Payload | Description |
-|------------|---------|-------------|
-| `onWebEntitlementChanged` | `WebEntitlement | null` | Web entitlement status changed |
+**5. Values of unknown shape cross as JSON strings (E2).**
+There is no codegen type for "any JSON value", so `getRemoteConfig`, `getFeatureVariant`,
+`getSessionData` and friends cross as a JSON **string**, parsed in the facade. Also:
+`Record<string, unknown>` is codegen-**illegal** (`UnsupportedGenericParserError`) — general TS
+unions are fine.
 
 ---
 
-## Firestore Paths (Read)
+## Screens are two different things
 
-This SDK does NOT read Firestore directly. All Firestore reads are handled by the native iOS and Android SDKs. See their respective AGENT.md files for Firestore path details.
+- **`<AppDNAScreenSlot name="…" />`** embeds a server-driven screen **inline** in your React layout
+  (a Fabric component). It raises no delegate events.
+- **`AppDNA.screens.show(id)` / `.showFlow(id)`** **present** a screen over the app. These are what
+  fire `onScreenPresented` / `onScreenDismissed` / `onFlowCompleted` on the 9th delegate.
 
----
-
-## Events Emitted
-
-This SDK does NOT emit events directly. All event tracking is handled by the native iOS and Android SDKs via native modules. See their respective AGENT.md files for event details.
-
----
-
-## File Structure
-
-### TypeScript (Public API)
-
-- `src/index.ts` -- Main AppDNA class with all static async methods; NativeModules/NativeEventEmitter setup
-- `src/types.ts` -- TypeScript type definitions (WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAOptions)
-
-### iOS Bridge
-
-- `ios/AppdnaModule.swift` -- RCTEventEmitter subclass implementing all @objc methods; delegates to native `AppDNA` singleton; emits `onWebEntitlementChanged` events
-- `ios/AppdnaModule.m` -- Objective-C bridge header for React Native module registration
-
-### Android Bridge
-
-- `android/src/main/java/com/appdna/rn/AppdnaModule.kt` -- ReactContextBaseJavaModule implementing all @ReactMethod functions; delegates to native `AppDNA` singleton; emits `onWebEntitlementChanged` events
-- `android/src/main/java/com/appdna/rn/AppdnaPackage.kt` -- ReactPackage registration
-
-### Example
-
-- `example/App.tsx` -- Example React Native app demonstrating SDK usage
+A `custom_view` block is registered from **native** code — `AppDNA.registerCustomView` takes an
+`AnyView` / `@Composable`. You cannot pass a React component: JavaScript has no native view to hand
+it.
 
 ---
 
-## Backend Module Dependencies
+## Before you change anything
 
-All backend dependencies are inherited from the native iOS and Android SDKs:
+1. Edit the **IR** (`src/lib/sdk-delegates/sdk-methods.ts`), then run `pnpm sdk-codegen`. Generated
+   files carry a do-not-edit banner and CI fails on hand-edits.
+2. Implement it in **Kotlin, Swift, and the facade**. `check:rn-facade-parity` names exactly which of
+   the six sides you missed.
+3. New behaviour needs a **shared fixture** (`packages/sdk-shared-fixtures/`) so all four SDKs assert
+   identical output.
+4. **Compile both natives.** A typecheck and a jest run compile *neither* — that is how
+   `Environment.staging` (a case the enum has never had) survived in shipped source.
 
-- **monetization**: paywall configs (via native SDK)
-- **onboarding**: onboarding flow configs (via native SDK)
-- **experiments**: experiment configs (via native SDK)
-- **feature-flags**: feature flags (via native SDK)
-- **feedback**: survey configs and responses (via native SDK)
-- **web-entitlements**: web entitlements (via native SDK)
-- **deep-links**: deferred deep links (via native SDK)
-- **ingest**: event ingestion (via native SDK)
-- **sdk-bootstrap**: bootstrap (via native SDK)
-
----
-
-## Rule
-
-Any new module feature that writes config to Firestore or adds new events MUST update this SDK. For React Native, this means:
-1. Add a new async method in `src/index.ts`
-2. Add the corresponding type in `src/types.ts` (if new data model)
-3. Add the corresponding `@objc` method in `ios/AppdnaModule.swift`
-4. Add the corresponding `@ReactMethod` function in `android/src/main/java/com/appdna/rn/AppdnaModule.kt`
+© 2026 AppDNA AI, Inc.

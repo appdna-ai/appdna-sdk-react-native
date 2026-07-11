@@ -279,6 +279,104 @@ public final class AppdnaModuleImpl: NSObject {
         resolve(nil)
     }
 
+    // MARK: - Session data / traits / location (P8)
+    //
+    // Both natives have shipped these all along; RN never wrapped them, which is why the docs
+    // described methods that did not exist. Values cross as JSON (E2) — native takes `Any`, and
+    // there is no codegen type for "any JSON value".
+
+    @objc(setSessionData:valueJson:resolve:reject:)
+    public func setSessionData(_ key: String, valueJson: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        guard let value = AppdnaJSON.decode(valueJson) else {
+            // Native's signature takes a non-optional `Any`; "store null" is not an operation either
+            // SDK exposes. Refusing loudly beats storing a sentinel the host can never distinguish.
+            reject("INVALID_VALUE", "setSessionData requires a non-null JSON value", nil)
+            return
+        }
+        AppDNA.setSessionData(key: key, value: value)
+        resolve(nil)
+    }
+
+    @objc(getSessionData:resolve:reject:)
+    public func getSessionData(_ key: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        resolve(AppdnaJSON.encode(AppDNA.getSessionData(key: key)))
+    }
+
+    @objc(clearSessionData:reject:)
+    public func clearSessionData(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        AppDNA.clearSessionData()
+        resolve(nil)
+    }
+
+    @objc(getUserTraits:reject:)
+    public func getUserTraits(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        resolve(AppdnaJSON.encode(AppDNA.getUserTraits()))
+    }
+
+    @objc(getLocationData:resolve:reject:)
+    public func getLocationData(_ fieldId: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        let loc = AppDNA.getLocationData(fieldId: fieldId)
+        resolve(AppdnaJSON.encode(loc.map(AppdnaMappers.map)))
+    }
+
+    // MARK: - Screens (P8 — the 9th delegate)
+    //
+    // §18.6 excluded AppDNAScreenDelegate because "RN has no screen surface until P4 lands
+    // AppDNAScreenSlot". P4 landed it — but the slot is INLINE and raises nothing: the screen
+    // delegate's observe events are fired by `ScreenManager`, the PRESENTED-screen path. RN could not
+    // present a screen at all while iOS and Android both shipped the identical surface. That is what
+    // the docs have been describing all along.
+    //
+    // The RESULT is delivered to `onScreenDismissed` / `onFlowCompleted` (events), not to the
+    // promise: a screen can be dismissed long after the call settles, so a promise cannot carry it.
+
+    @objc(showScreen:resolve:reject:)
+    public func showScreen(_ screenId: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            AppDNA.showScreen(screenId)
+            resolve(true)
+        }
+    }
+
+    @objc(showFlow:resolve:reject:)
+    public func showFlow(_ flowId: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            AppDNA.showFlow(flowId)
+            resolve(true)
+        }
+    }
+
+    @objc(dismissScreen:reject:)
+    public func dismissScreen(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            AppDNA.dismissScreen()
+            resolve(nil)
+        }
+    }
+
+    @objc(previewScreen:resolve:reject:)
+    public func previewScreen(_ json: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            AppDNA.previewScreen(json: json)
+            resolve(true)
+        }
+    }
+
+    @objc(enableNavigationInterception:resolve:reject:)
+    public func enableNavigationInterception(_ screens: NSArray?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        // `nil` means intercept EVERY screen — not "intercept none". Coercing a missing list to `[]`
+        // would silently mean the opposite of what the host asked for.
+        let list = screens?.compactMap { $0 as? String }
+        AppDNA.enableNavigationInterception(forScreens: list)
+        resolve(nil)
+    }
+
+    @objc(disableNavigationInterception:reject:)
+    public func disableNavigationInterception(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        AppDNA.disableNavigationInterception()
+        resolve(nil)
+    }
+
     @objc(suppressMessages:)
     public func suppressMessages(_ suppress: Bool) {
         AppDNA.inAppMessages.suppressDisplay(suppress)
@@ -454,7 +552,11 @@ public final class AppdnaModuleImpl: NSObject {
         let deepLinks = DeepLinkForwarder(emit: emit)
         let initDelegate = InitForwarder(emit: emit)
         let lifecycle = LifecycleForwarder(emit: emit)
-        forwarders = [onboarding, paywall, survey, messages, push, billing, deepLinks, initDelegate, lifecycle]
+        // The 9th delegate. `AppDNA.screenDelegate` is WEAK, so it must be retained by `forwarders` —
+        // otherwise it deallocates the instant registerDelegates returns and every screen event is
+        // silently lost, which is precisely the dead-delegate class this spec exists to remove.
+        let screen = ScreenForwarder(emit: emit)
+        forwarders = [onboarding, paywall, survey, messages, push, billing, deepLinks, initDelegate, lifecycle, screen]
 
         AppDNA.onboarding.setDelegate(onboarding)
         AppDNA.paywall.setDelegate(paywall)
@@ -465,6 +567,7 @@ public final class AppdnaModuleImpl: NSObject {
         AppDNA.deepLinks.setDelegate(deepLinks)
         AppDNA.initDelegate = initDelegate
         AppDNA.lifecycleDelegate = lifecycle
+        AppDNA.screenDelegate = screen
 
         // 🔴 `shouldShowMessage` defaults to ALLOW on timeout; `onPromoCodeSubmit` to REJECT. A
         // uniform default here is how a paywall silently starts accepting unvalidated promo codes.
@@ -504,6 +607,7 @@ public final class AppdnaModuleImpl: NSObject {
         AppDNA.deepLinks.setDelegate(nil)
         AppDNA.initDelegate = nil
         AppDNA.lifecycleDelegate = nil
+        AppDNA.screenDelegate = nil
         AppDNA.inAppMessages.asyncShouldShowMessage = nil
         AppDNA.deepLinks.asyncShouldOpen = nil
         AppDNA.asyncOnScreenAction = nil

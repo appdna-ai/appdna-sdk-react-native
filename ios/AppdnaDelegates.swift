@@ -205,6 +205,32 @@ final class PaywallForwarder: NSObject, AppDNAPaywallDelegate {
 
 // MARK: - Surveys, messages, push, billing, deep links, init
 
+/**
+ The 9th delegate (P8). `onScreenAction` is a VETO and rides `AppDNA.asyncOnScreenAction` (the
+ host-callback seam), exactly as §18.6 ruled — but the protocol still requires it, so it returns
+ `true` here: the async seam is the one that actually asks the host, and answering `false` from both
+ would let the two answers disagree about the same action.
+ */
+final class ScreenForwarder: NSObject, AppDNAScreenDelegate {
+    private let emit: AppdnaEmit
+    init(emit: @escaping AppdnaEmit) { self.emit = emit }
+
+    func onScreenPresented(screenId: String) {
+        emit("onScreenPresented", ["screenId": screenId])
+    }
+
+    func onScreenDismissed(screenId: String, result: ScreenResult) {
+        emit("onScreenDismissed", ["screenId": screenId, "result": AppdnaMappers.map(result)])
+    }
+
+    func onFlowCompleted(flowId: String, result: FlowResult) {
+        emit("onFlowCompleted", ["flowId": flowId, "result": AppdnaMappers.map(result)])
+    }
+
+    /// Not the host's answer — `AppDNA.asyncOnScreenAction` is. Allow, and let the async seam veto.
+    func onScreenAction(screenId: String, action: SectionAction) -> Bool { true }
+}
+
 final class SurveyForwarder: NSObject, AppDNASurveyDelegate {
     private let emit: AppdnaEmit
     init(emit: @escaping AppdnaEmit) { self.emit = emit }

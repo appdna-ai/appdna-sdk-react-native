@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-ios-adapter.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 40dd33ff8d31da20dd890d5da60c7be0a63846be
+// Last codegen commit: e77caa56c0afdb8ec33825cc98fd5d0941c4ca7f
 
 #import <React/RCTAssert.h>
 #import <React/RCTBridgeModule.h>
@@ -88,6 +88,9 @@ RCT_EXPORT_MODULE()
   if ([name isEqualToString:@"onRestoreCompleted"]) { [self emitOnRestoreCompleted:payload]; return; }
   if ([name isEqualToString:@"onEntitlementsChanged"]) { [self emitOnEntitlementsChanged:payload]; return; }
   if ([name isEqualToString:@"onBillingUnavailable"]) { [self emitOnBillingUnavailable:payload]; return; }
+  if ([name isEqualToString:@"onScreenPresented"]) { [self emitOnScreenPresented:payload]; return; }
+  if ([name isEqualToString:@"onScreenDismissed"]) { [self emitOnScreenDismissed:payload]; return; }
+  if ([name isEqualToString:@"onFlowCompleted"]) { [self emitOnFlowCompleted:payload]; return; }
   if ([name isEqualToString:@"onSurveyPresented"]) { [self emitOnSurveyPresented:payload]; return; }
   if ([name isEqualToString:@"onSurveyCompleted"]) { [self emitOnSurveyCompleted:payload]; return; }
   if ([name isEqualToString:@"onSurveyDismissed"]) { [self emitOnSurveyDismissed:payload]; return; }
@@ -290,6 +293,80 @@ RCT_EXPORT_MODULE()
             reject:(RCTPromiseRejectBlock )reject
 {
   [_impl presentSurvey:surveyId resolve:resolve reject:reject];
+}
+
+- (void)showScreen:(NSString *)screenId
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl showScreen:screenId resolve:resolve reject:reject];
+}
+
+- (void)showFlow:(NSString *)flowId
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl showFlow:flowId resolve:resolve reject:reject];
+}
+
+- (void)dismissScreen:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl dismissScreen:resolve reject:reject];
+}
+
+- (void)previewScreen:(NSString *)json
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl previewScreen:json resolve:resolve reject:reject];
+}
+
+- (void)enableNavigationInterception:(NSArray *)screens
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl enableNavigationInterception:screens resolve:resolve reject:reject];
+}
+
+- (void)disableNavigationInterception:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl disableNavigationInterception:resolve reject:reject];
+}
+
+- (void)setSessionData:(NSString *)key
+            valueJson:(NSString *)valueJson
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl setSessionData:key valueJson:valueJson resolve:resolve reject:reject];
+}
+
+- (void)getSessionData:(NSString *)key
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl getSessionData:key resolve:resolve reject:reject];
+}
+
+- (void)clearSessionData:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl clearSessionData:resolve reject:reject];
+}
+
+- (void)getUserTraits:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl getUserTraits:resolve reject:reject];
+}
+
+- (void)getLocationData:(NSString *)fieldId
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl getLocationData:fieldId resolve:resolve reject:reject];
 }
 
 - (void)suppressMessages:(BOOL)suppress

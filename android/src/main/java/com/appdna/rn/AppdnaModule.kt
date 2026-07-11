@@ -272,6 +272,98 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         promise.resolve(null)
     }
 
+    // ── Session data / traits / location (P8) ────────────────────────────────
+    //
+    // The value crosses as JSON (E2). `AppdnaBridge.fromJson` returns a Kotlin value; native takes
+    // `Any`, so a null decodes to "no value" rather than throwing.
+
+    override fun setSessionData(key: String, valueJson: String, promise: Promise) {
+        val value = AppdnaBridge.fromJson(valueJson)
+        if (value == null) {
+            // `setSessionData(k, null)` is not "store null" — native's signature takes a non-null
+            // `Any`. Clearing one key is not an operation either SDK exposes, so refusing loudly
+            // beats silently storing a sentinel the host will never be able to distinguish.
+            promise.reject("INVALID_VALUE", "setSessionData requires a non-null JSON value")
+            return
+        }
+        AppDNA.setSessionData(key, value)
+        promise.resolve(null)
+    }
+
+    override fun getSessionData(key: String, promise: Promise) {
+        promise.resolve(AppdnaBridge.toJson(AppDNA.getSessionData(key)))
+    }
+
+    override fun clearSessionData(promise: Promise) {
+        AppDNA.clearSessionData()
+        promise.resolve(null)
+    }
+
+    override fun getUserTraits(promise: Promise) {
+        promise.resolve(AppdnaBridge.toJson(AppDNA.getUserTraits()))
+    }
+
+    override fun getLocationData(fieldId: String, promise: Promise) {
+        val loc = AppDNA.getLocationData(fieldId)
+        promise.resolve(AppdnaBridge.toJson(loc?.let { AppdnaMappers.map(it) }))
+    }
+
+    // ── Screens (P8 — the 9th delegate) ───────────────────────────────────────
+    //
+    // The native `showScreen`/`showFlow` take a completion callback, but the RESULT is ALSO delivered
+    // to `AppDNAScreenDelegate.onScreenDismissed`/`onFlowCompleted` — and a screen can be dismissed
+    // long after the promise settles. Routing the result through the delegate (an EVENT) rather than
+    // the promise is what keeps one result with one source: a promise that resolved on presentation
+    // cannot also carry a dismissal that has not happened yet.
+
+    override fun showScreen(screenId: String, promise: Promise) {
+        // E10, same as presentOnboarding: present-style calls go on the UI thread so native's own
+        // main-looper check takes the latch-free path. Calling straight through would block the JS
+        // thread for the latch's five seconds. `false` when there is no foreground Activity to
+        // present from — the host learns nothing happened instead of silently believing it did.
+        val activity = reactContext.currentActivity ?: return promise.resolve(false)
+        activity.runOnUiThread {
+            AppDNA.showScreen(screenId)
+            promise.resolve(true)
+        }
+    }
+
+    override fun showFlow(flowId: String, promise: Promise) {
+        val activity = reactContext.currentActivity ?: return promise.resolve(false)
+        activity.runOnUiThread {
+            AppDNA.showFlow(flowId)
+            promise.resolve(true)
+        }
+    }
+
+    override fun dismissScreen(promise: Promise) {
+        val activity = reactContext.currentActivity ?: return promise.resolve(null)
+        activity.runOnUiThread {
+            AppDNA.dismissScreen()
+            promise.resolve(null)
+        }
+    }
+
+    override fun previewScreen(json: String, promise: Promise) {
+        val activity = reactContext.currentActivity ?: return promise.resolve(false)
+        activity.runOnUiThread {
+            promise.resolve(AppDNA.previewScreen(json))
+        }
+    }
+
+    override fun enableNavigationInterception(screens: ReadableArray?, promise: Promise) {
+        // `null` means intercept every screen — NOT "intercept none". Passing an empty list instead
+        // would silently mean the opposite of what the host asked for.
+        val list = screens?.toArrayList()?.mapNotNull { it as? String }
+        AppDNA.enableNavigationInterception(list)
+        promise.resolve(null)
+    }
+
+    override fun disableNavigationInterception(promise: Promise) {
+        AppDNA.disableNavigationInterception()
+        promise.resolve(null)
+    }
+
     override fun suppressMessages(suppress: Boolean) {
         AppDNA.inAppMessages.suppressDisplay(suppress)
     }
@@ -442,6 +534,9 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         AppDNA.push.setDelegate(PushForwarder(emitter))
         AppDNA.billing.setDelegate(BillingForwarder(emitter))
         AppDNA.deepLinks.setDelegate(DeepLinkForwarder(emitter))
+        // The 9th delegate. `AppDNA.screenDelegate` is a var whose setter forwards to
+        // ScreenManager.setDelegate — the presented-screen path, which is what actually fires these.
+        AppDNA.screenDelegate = ScreenForwarder(emitter)
         AppDNA.setInitDelegate(InitForwarder(emitter))
 
         // 🔴 `shouldShowMessage` defaults to ALLOW on timeout; `onPromoCodeSubmit` to REJECT. A
@@ -497,6 +592,9 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
             "onRestoreCompleted" -> emitOnRestoreCompleted(payload)
             "onEntitlementsChanged" -> emitOnEntitlementsChanged(payload)
             "onBillingUnavailable" -> emitOnBillingUnavailable(payload)
+            "onScreenPresented" -> emitOnScreenPresented(payload)
+            "onScreenDismissed" -> emitOnScreenDismissed(payload)
+            "onFlowCompleted" -> emitOnFlowCompleted(payload)
             "onSurveyPresented" -> emitOnSurveyPresented(payload)
             "onSurveyCompleted" -> emitOnSurveyCompleted(payload)
             "onSurveyDismissed" -> emitOnSurveyDismissed(payload)
@@ -541,6 +639,7 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         AppDNA.inAppMessages.setAsyncShouldShowMessage(null)
         AppDNA.deepLinks.asyncShouldOpen = null
         AppDNA.asyncOnScreenAction = null
+        AppDNA.screenDelegate = null
         invoker = null
         // E6: drain the pending veto map, rejecting each — a JS side that no longer exists will
         // never answer, and native would otherwise await forever.

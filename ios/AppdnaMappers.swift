@@ -127,4 +127,55 @@ enum AppdnaMappers {
     private static func compact(_ dict: [String: Any?]) -> [String: Any] {
         dict.compactMapValues { $0 }
     }
+    /**
+     * P8 — the 9th delegate's result payloads.
+     *
+     * The keys are Android's, EXACTLY: `screen_id`/`last_action`/`duration_ms` (snake_case), not the
+     * Swift property names. iOS hands the delegate a typed `ScreenResult` while Android hands it an
+     * already-encoded map, so without this the same dismissal would reach a JS host as `screenId` on
+     * one platform and `screen_id` on the other — a host would have to branch on Platform.OS to read
+     * its own result. The SDKs disagree about the type; the WIRE must not.
+     */
+    static func map(_ result: ScreenResult) -> [String: Any] {
+        compact([
+            "screen_id": result.screenId,
+            "dismissed": result.dismissed,
+            "responses": result.responses,
+            "last_action": result.lastAction,
+            "duration_ms": result.duration_ms,
+            "error": result.error.map { String(describing: $0) },
+        ])
+    }
+
+    static func map(_ result: FlowResult) -> [String: Any] {
+        compact([
+            "flow_id": result.flowId,
+            "completed": result.completed,
+            "last_screen_id": result.lastScreenId,
+            "responses": result.responses,
+            "screens_viewed": result.screensViewed,
+            "duration_ms": result.duration_ms,
+            "error": result.error.map { String(describing: $0) },
+        ])
+    }
+
+    /// P8 — the onboarding location field's structured answer. Keys match Android's exactly (both
+    /// natives already declare them in snake_case), so the two wires agree without translation.
+    static func map(_ loc: LocationData) -> [String: Any] {
+        compact([
+            "formatted_address": loc.formatted_address,
+            "city": loc.city,
+            "state": loc.state,
+            "state_code": loc.state_code,
+            "country": loc.country,
+            "country_code": loc.country_code,
+            "latitude": loc.latitude,
+            "longitude": loc.longitude,
+            "timezone": loc.timezone,
+            "timezone_offset": loc.timezone_offset,
+            "postal_code": loc.postal_code,
+            "raw_query": loc.raw_query,
+        ])
+    }
+
 }

@@ -29,6 +29,20 @@ enum AppdnaJSON {
         Log.warning("AppDNA: cannot JSON-encode a value of type \(type(of: value)); returning null")
         return "null"
     }
+
+    /**
+     * The inverse (P8, for `setSessionData`). Android's mirror is `AppdnaBridge.fromJson`.
+     *
+     * Returns nil for a JSON `null`, for empty input, and for anything unparseable — all three mean
+     * "no value" to every caller, and collapsing them here keeps the callers from each inventing a
+     * different answer. `.fragmentsAllowed` again, because a bare `true` or `3` is the common case.
+     */
+    static func decode(_ json: String) -> Any? {
+        guard !json.isEmpty, let data = json.data(using: .utf8) else { return nil }
+        guard let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+              !(value is NSNull) else { return nil }
+        return value
+    }
 }
 
 /// The core SDK's logger is internal to `AppDNASDK`; this wrapper has no logger of its own and must
