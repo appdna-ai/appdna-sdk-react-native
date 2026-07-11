@@ -27,8 +27,24 @@
   //     xcrun simctl launch <device> <bundle-id> -appdnaApiKey adn_test_…
   //
   // `-key value` pairs land in NSUserDefaults' argument domain, which lives only in this process.
-  NSString *apiKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"appdnaApiKey"];
-  self.initialProps = apiKey.length > 0 ? @{@"apiKey" : apiKey} : @{};
+  // The content ids travel the same way, for the same reason: they identify a real customer app, and
+  // this example is public. A device pass that only proves "the SDK configured" is not a device pass
+  // — you have to render an actual onboarding flow, paywall and survey — so the ids have to come from
+  // somewhere, and that somewhere is not this repository.
+  NSMutableDictionary *props = [NSMutableDictionary new];
+  NSDictionary<NSString *, NSString *> *launchKeys = @{
+    @"appdnaApiKey" : @"apiKey",
+    @"appdnaOnboardingId" : @"onboardingId",
+    @"appdnaPaywallId" : @"paywallId",
+    @"appdnaSurveyId" : @"surveyId",
+  };
+  for (NSString *arg in launchKeys) {
+    NSString *value = [[NSUserDefaults standardUserDefaults] stringForKey:arg];
+    if (value.length > 0) {
+      props[launchKeys[arg]] = value;
+    }
+  }
+  self.initialProps = props;
 
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
 }

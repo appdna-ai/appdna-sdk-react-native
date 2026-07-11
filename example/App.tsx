@@ -17,9 +17,15 @@ import { AppDNA, AppDNAScreenSlot } from '@appdna-ai/react-native-sdk';
  * Without a key the app still renders — it just says so. A demo that crashes on a missing secret
  * teaches nothing about the SDK.
  */
-type Props = { apiKey?: string };
+type Props = {
+  apiKey?: string;
+  /** Real content ids, injected as launch args — see AppDelegate.mm. Never committed. */
+  onboardingId?: string;
+  paywallId?: string;
+  surveyId?: string;
+};
 
-export default function App({ apiKey }: Props) {
+export default function App({ apiKey, onboardingId, paywallId, surveyId }: Props) {
   const [status, setStatus] = useState(apiKey ? 'Configuring…' : 'No API key — pass -appdnaApiKey');
   const [log, setLog] = useState<string[]>([]);
   const [diagnostics, setDiagnostics] = useState('');
@@ -104,9 +110,18 @@ export default function App({ apiKey }: Props) {
         <View style={styles.buttons}>
           <Button label="Track event" onPress={() => { AppDNA.track('rn_e2e_button', { source: 'example' }); append('track(rn_e2e_button) queued'); }} />
           <Button label="Flush now" onPress={async () => { await AppDNA.flush(); append('flush() resolved'); }} />
-          <Button label="Present onboarding" onPress={async () => append(`presentOnboarding → ${await AppDNA.onboarding.present('default')}`)} />
-          <Button label="Present paywall" onPress={async () => append(`presentPaywall → ${await AppDNA.paywall.present('default')}`)} />
-          <Button label="Show screen" onPress={async () => append(`screens.show → ${await AppDNA.screens.show('welcome')}`)} />
+          <Button
+            label="Present onboarding"
+            onPress={async () => append(`presentOnboarding → ${await AppDNA.onboarding.present(onboardingId ?? 'default')}`)}
+          />
+          <Button
+            label="Present paywall"
+            onPress={async () => { await AppDNA.paywall.present(paywallId ?? 'default'); append('presentPaywall dispatched'); }}
+          />
+          <Button
+            label="Show survey"
+            onPress={async () => { await AppDNA.surveys.present(surveyId ?? 'default'); append('showSurvey dispatched'); }}
+          />
           <Button
             label="Session round-trip"
             onPress={async () => {

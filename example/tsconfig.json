@@ -1,0 +1,24 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    // Typecheck the example against the SDK's SOURCE, not its built `lib/typescript`.
+    //
+    // Two things went wrong without this. The example had no tsconfig at all, so `tsc --noEmit` here
+    // typechecked ZERO files and exited 0 — a green that meant nothing, and it let a call to
+    // `AppDNA.surveys.show()` (a method that has never existed; the facade calls it `present`) ship
+    // into the example, where only a device run caught it. And when tsc was forced to look, it
+    // resolved the STALE `lib/typescript` that npm had installed — so `screens`, `diagnose` and
+    // `getLastInitError` all "did not exist" while sitting right there in src/index.ts.
+    //
+    // Pointing at the source removes both failure modes: the example is checked against the facade
+    // that is actually in the tree.
+    "paths": {
+      "@appdna-ai/react-native-sdk": ["../src/index"]
+    }
+  },
+  "include": ["App.tsx", "index.js"],
+  "exclude": ["node_modules", "android", "ios"]
+}
