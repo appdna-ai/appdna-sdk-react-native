@@ -187,11 +187,25 @@ internal object AppdnaBridge {
      *
      * A malformed reply decodes to `null`, which every caller reads as "apply the native default" —
      * the same thing a timeout means. A host cannot make native throw by replying with garbage.
+     *
+     * The two guards below are why this is not a one-liner. `JSONTokener` is **lenient**: it happily
+     * parses `not json` as the bare word `"not"` and leaves ` json` unread, and it accepts trailing
+     * garbage after a complete value. So garbage came back as a String — a *value*, i.e. an opinion —
+     * and a promo-code hook would have taken it. iOS's `JSONSerialization` rejects both, so the two
+     * platforms silently disagreed about what "malformed" means.
      */
     fun fromJson(json: String?): Any? {
         if (json.isNullOrBlank()) return null
+        val trimmed = json.trim()
         return try {
-            unwrap(org.json.JSONTokener(json).nextValue())
+            val tokener = org.json.JSONTokener(trimmed)
+            val value = tokener.nextValue()
+            // Anything left over means the input was never one JSON value.
+            if (tokener.more()) return null
+            // A legal top-level JSON string starts with a quote. If the tokener produced a String
+            // from input that does not, it invented one out of a bare word.
+            if (value is String && !trimmed.startsWith("\"")) return null
+            unwrap(value)
         } catch (_: org.json.JSONException) {
             null
         }

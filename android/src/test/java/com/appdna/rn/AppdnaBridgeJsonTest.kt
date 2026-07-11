@@ -78,6 +78,22 @@ class AppdnaBridgeJsonTest {
         assertNull(AppdnaBridge.fromJson("{"))
     }
 
+    /**
+     * `JSONTokener` is lenient where `JSONSerialization` (iOS) is not: it reads `not json` as the
+     * bare word "not", and it ignores trailing garbage after a complete value. Garbage therefore
+     * came back as a *value* — an opinion — which for a veto hook is the difference between "the
+     * host said nothing, apply the default" and "the host said yes".
+     */
+    @Test
+    fun `leniency does not turn garbage into an opinion`() {
+        assertNull(AppdnaBridge.fromJson("not"))          // a bare word is not a JSON string
+        assertNull(AppdnaBridge.fromJson("true false"))   // trailing garbage after a legal value
+        assertNull(AppdnaBridge.fromJson("""{"a":1} junk"""))
+        // …while the legal forms still decode.
+        assertEquals("not", AppdnaBridge.fromJson("\"not\""))
+        assertEquals(true, AppdnaBridge.fromJson("  true  "))
+    }
+
     @Test
     fun `a JSON null inside an object decodes to a Kotlin null`() {
         assertEquals(mapOf("a" to null), AppdnaBridge.fromJson("""{"a":null}"""))

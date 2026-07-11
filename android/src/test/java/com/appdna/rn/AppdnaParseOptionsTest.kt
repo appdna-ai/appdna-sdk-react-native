@@ -4,6 +4,8 @@ import ai.appdna.sdk.BillingProvider
 import com.facebook.react.bridge.JavaOnlyMap
 import com.facebook.react.bridge.ReactApplicationContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
@@ -67,8 +69,21 @@ class AppdnaParseOptionsTest {
     }
 
     @Test
-    fun `frameworkVersion is passed through`() {
-        val opts = JavaOnlyMap().apply { putString("frameworkVersion", "0.76.5") }
-        assertEquals("0.76.5", module.parseOptions(opts).frameworkVersion)
+    fun `frameworkVersion is the wrapper's own version, not the host's`() {
+        // Same rule as the framework tag: a wrapper ASSERTS what it is, it does not ask. This used
+        // to pass the host's value through, so the field was empty unless a host thought to set it
+        // (none did), and a host that did set it could claim any version it liked.
+        //
+        // The assertion is that the host cannot influence the value — deliberately NOT that it
+        // equals a literal "1.0.8", which would just restate the constant and need editing on every
+        // release. `check:wrapper-version-selfreport` owns the value, pinning it to package.json.
+        val absent = module.parseOptions(JavaOnlyMap()).frameworkVersion
+        val spoofed = module.parseOptions(
+            JavaOnlyMap().apply { putString("frameworkVersion", "0.76.5") },
+        ).frameworkVersion
+
+        assertEquals(absent, spoofed)
+        assertNotEquals("0.76.5", spoofed)
+        assertTrue("reports no version at all", !absent.isNullOrBlank())
     }
 }
