@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/index.ts
 // Generator: scripts/sdk-codegen/emit-delegates.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: e77caa56c0afdb8ec33825cc98fd5d0941c4ca7f
+// Last codegen commit: 13c1ee7516018f38ce75906d0a56a89e0a16b34b
 
 /** Onboarding flow lifecycle observer + SPEC-083/419/421 async return-value hooks (routed via the sync_callbacks channel on Flutter/RN; native-hand-written on iOS, hand-written-Android per D11). */
 export interface AppDNAOnboardingDelegate {
@@ -27,8 +27,8 @@ export interface AppDNAPaywallDelegate {
   onPaywallAction(paywallId: string, action: string): void;
   onPaywallPurchaseStarted(paywallId: string, productId: string): void;
   onPaywallPurchaseCompleted(paywallId: string, productId: string, transaction: Record<string, unknown>): void;
-  /** error type: Swift Error / Kotlin Throwable / Dart Object / TS unknown. */
-  onPaywallPurchaseFailed(paywallId: string, error: unknown): void;
+  /** A wrapper host cannot introspect `error`: it crosses the bridge as an opaque platform object, so a JS or Dart host could not tell a user cancel from a declined card from a dead network — and so could not decide whether a retry was even sensible. `errorType` is the stable discriminator (userCancelled | productNotFound | verificationFailed | networkError | serverError | pending | providerNotAvailable | unknown). `productId` is null only when no product was ever selected — a paywall selling two plans must say WHICH one failed. */
+  onPaywallPurchaseFailed(paywallId: string, error: unknown, errorType: string, productId: string | null): void;
   onPaywallRestoreStarted(paywallId: string): void;
   onPaywallRestoreCompleted(paywallId: string, restoredProductIds: string[]): void;
   onPaywallRestoreFailed(paywallId: string, error: unknown): void;
