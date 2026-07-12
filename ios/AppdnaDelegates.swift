@@ -413,6 +413,13 @@ enum AppdnaVetoDecoder {
 
 
     /// `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `.proceed`.
+    ///
+    /// `skipToWithData` is an ACCEPTED ALIAS of `skipTo`, not a second encoding: the canonical wire
+    /// shape is `{type:"skipTo", stepId, data?}`, and `data` is what promotes it to
+    /// `.skipToWithData`. The alias exists because the published docs named `skipToWithData` for a
+    /// case no decoder had — so a host that followed them fell to `default` and the user SILENTLY
+    /// ADVANCED to the next step instead of skipping. A mis-route with no error and no log is worse
+    /// than a rejection; accepting the string those hosts already send costs one line.
     static func stepAdvanceResult(_ reply: Any?) -> StepAdvanceResult {
         guard let map = reply as? [String: Any] else { return .proceed }
         switch (map["type"] as? String) ?? "proceed" {
@@ -420,7 +427,7 @@ enum AppdnaVetoDecoder {
             return .proceedWithData(map["data"] as? [String: Any] ?? [:])
         case "block":
             return .block(message: (map["message"] as? String) ?? "")
-        case "skipTo":
+        case "skipTo", "skipToWithData":
             let stepId = (map["stepId"] as? String) ?? ""
             if let data = map["data"] as? [String: Any], !data.isEmpty {
                 return .skipToWithData(stepId: stepId, data: data)

@@ -12,3 +12,6 @@ ios/build/
 # RN codegen output (regenerated per host build).
 android/generated/
 ios/generated/
+
+# Scratch dir for scripts/check-rn-docs-types.ts (generated doc snippets)
+.docs-typecheck/

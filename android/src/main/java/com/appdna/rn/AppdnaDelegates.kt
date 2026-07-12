@@ -453,17 +453,26 @@ internal fun isAuthAction(stepData: Map<String, Any>?): Boolean =
  */
 internal object AppdnaVetoDecoder {
 
-    /** `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `Proceed`. */
     /** Did JS reply "I have no handler for this hook"? See `UNHANDLED` in hostCallbacks.ts. */
     fun isUnhandled(reply: Any?): Boolean =
         (reply as? Map<*, *>)?.get("__appdna_unhandled") == true
 
+    /**
+     * `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `Proceed`.
+     *
+     * `skipToWithData` is an ACCEPTED ALIAS of `skipTo`, not a second encoding: the canonical wire
+     * shape is `{type:"skipTo", stepId, data?}`, and `data` is what promotes it to `SkipTo(stepId,
+     * data)`. The alias exists because the published docs named `skipToWithData` for a case no
+     * decoder had — so a host that followed them fell to `else` and the user SILENTLY ADVANCED to
+     * the next step instead of skipping. A mis-route with no error and no log is worse than a
+     * rejection; accepting the string those hosts already send costs one line.
+     */
     fun stepAdvanceResult(reply: Any?): StepAdvanceResult {
         val map = reply as? Map<*, *> ?: return StepAdvanceResult.Proceed
         return when (map["type"] as? String ?: "proceed") {
             "proceedWithData" -> StepAdvanceResult.ProceedWithData(anyMap(map["data"]))
             "block" -> StepAdvanceResult.Block(map["message"] as? String ?: "")
-            "skipTo" -> {
+            "skipTo", "skipToWithData" -> {
                 val stepId = map["stepId"] as? String ?: ""
                 val data = anyMap(map["data"])
                 if (data.isEmpty()) StepAdvanceResult.SkipTo(stepId) else StepAdvanceResult.SkipTo(stepId, data)
