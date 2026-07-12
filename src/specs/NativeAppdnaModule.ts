@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-spec.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 13c1ee7516018f38ce75906d0a56a89e0a16b34b
+// Last codegen commit: 4b9457572d2961caf11c76c3323445d4faff4d03
 
 import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
@@ -99,7 +99,7 @@ export interface Spec extends TurboModule {
   getExperimentExposures(): Promise<Object[]>;
 
   /** Present an onboarding flow. Resolves false when no view controller / activity is available. */
-  presentOnboarding(flowId: string, context?: Object): Promise<boolean>;
+  presentOnboarding(flowId: string): Promise<boolean>;
 
   /** Present a paywall by id. */
   presentPaywall(paywallId: string, context?: Object): Promise<void>;

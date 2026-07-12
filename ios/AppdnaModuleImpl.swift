@@ -35,6 +35,10 @@ public final class AppdnaModuleImpl: NSObject {
     /// this, a reload left N handlers on the process-global singleton and delivered N-fold.
     private var entitlementObserverToken: UUID?
 
+    /// The token for the WEB-entitlement handler. Same story as the one above, one namespace over:
+    /// the SDK appends, so this must be tracked to be re-registrable and detachable.
+    private var webEntitlementObserverToken: UUID?
+
     /// The `AppDNA.configUpdated` NotificationCenter observer. Must be removed in `invalidate()`:
     /// it captures this bridge-scoped object, and a stale one left attached across a JS reload
     /// delivers every config change N-fold — the same reload leak the forwarders below exist for.
@@ -73,12 +77,26 @@ public final class AppdnaModuleImpl: NSObject {
         let parsed = parseOptions(options as? [String: Any])
         AppDNA.configure(apiKey: apiKey, environment: environment, options: parsed)
 
-        AppDNA.onWebEntitlementChanged { [weak self] entitlement in
-            self?.emit("onWebEntitlementChanged", ["entitlement": entitlement?.toMap() as Any])
-        }
+        observeWebEntitlementChanges()
         observeConfigUpdates()
         registerDelegates(vetoTimeout: parsed.vetoTimeout)
         resolve(nil)
+    }
+
+    /// The web-entitlement forwarder. Registered at most ONCE per module instance, and detached in
+    /// `invalidate()`.
+    ///
+    /// This used to be an unguarded `AppDNA.onWebEntitlementChanged { … }` inline in `configure()`.
+    /// The SDK APPENDS, so a host that called `configure()` twice — or shut the SDK down and
+    /// re-configured it — got TWO web-entitlement handlers on the process-global singleton, and every
+    /// change was delivered twice, forever. Android has guarded exactly this case since P2c
+    /// (`AppdnaModule.kt`, remove-then-add on `webEntitlementListener`); `observeConfigUpdates()`
+    /// below is guarded for the same reason. iOS was the one that was not.
+    private func observeWebEntitlementChanges() {
+        if webEntitlementObserverToken != nil { return }
+        webEntitlementObserverToken = AppDNA.onWebEntitlementChanged { [weak self] entitlement in
+            self?.emit("onWebEntitlementChanged", ["entitlement": entitlement?.toMap() as Any])
+        }
     }
 
     /// Native posts `AppDNA.configUpdated` whenever remote config is refreshed. Nothing in this
@@ -254,10 +272,14 @@ public final class AppdnaModuleImpl: NSObject {
 
     // MARK: - Onboarding / paywall / surveys / messages
 
-    @objc(presentOnboarding:context:resolve:reject:)
+    /// ⚠ No `context:` argument. It had one, the ObjC++ adapter forwarded it, and this method never
+    /// read it: `AppDNA.presentOnboarding(flowId:)` takes no context, and the SDK's own
+    /// `OnboardingModule.present(flowId:from:context:)` discards the argument it is handed
+    /// (AppDNA+Modules.swift). A host that passed `experimentOverrides` got a silent no-op. Removed
+    /// from the IR (`sdk-methods.ts`) rather than left as a parameter that does nothing.
+    @objc(presentOnboarding:resolve:reject:)
     public func presentOnboarding(
         _ flowId: String,
-        context: NSDictionary?,
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
     ) {
@@ -485,8 +507,22 @@ public final class AppdnaModuleImpl: NSObject {
         Task { resolve(await AppDNA.billing.getEntitlements().map(AppdnaMappers.map)) }
     }
 
+    /// Idempotent — re-arming must REPLACE the handler, never add a second one.
+    ///
+    /// `AppDNA.billing.onEntitlementsChanged` APPENDS into a token→handler dictionary, and this used
+    /// to store the new token straight over the old one: the previous handler stayed registered with
+    /// nothing left that could remove it. `AppDNAScreenSlot`'s sibling latch in `src/index.ts`
+    /// (`resetEntitlementObserver()` on `shutdown()`) deliberately re-arms so the next subscriber
+    /// re-sends this call — so `configure → shutdown → configure` registered a SECOND handler while
+    /// the first was still live, and every entitlement change from then on emitted
+    /// `onEntitlementsChanged` twice. N cycles, N duplicate grants per purchase. (Android never had
+    /// this: its `shutdown()` nulls the billing manager, taking its listeners with it.)
     @objc(startEntitlementObserver:reject:)
     public func startEntitlementObserver(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        if let token = entitlementObserverToken {
+            AppDNA.billing.removeEntitlementsChangedHandler(token)
+            entitlementObserverToken = nil
+        }
         entitlementObserverToken = AppDNA.billing.onEntitlementsChanged { [weak self] entitlements in
             self?.emit("onEntitlementsChanged", ["entitlements": entitlements.map(AppdnaMappers.map)])
         }
@@ -637,6 +673,10 @@ public final class AppdnaModuleImpl: NSObject {
         if let token = entitlementObserverToken {
             AppDNA.billing.removeEntitlementsChangedHandler(token)
             entitlementObserverToken = nil
+        }
+        if let token = webEntitlementObserverToken {
+            AppDNA.removeWebEntitlementChangedHandler(token)
+            webEntitlementObserverToken = nil
         }
         if let observer = configObserver {
             NotificationCenter.default.removeObserver(observer)

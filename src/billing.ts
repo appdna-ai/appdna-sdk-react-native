@@ -19,17 +19,56 @@ export type Entitlement = {
   offerType: string | null;
 };
 
-export type PurchaseResult = {
-  status: 'purchased' | 'cancelled' | 'pending' | 'unknown';
-  entitlement?: Entitlement;
+/**
+ * What a **successful** `purchase()` resolves with — the store transaction, exactly as both native
+ * mappers emit it (`AppdnaMappers.map(_ tx:)` / `AppdnaMappers.map(tx:)`).
+ *
+ * It replaces a `PurchaseResult = {status, entitlement?}` union that no native has ever produced.
+ * That type was fiction in both directions: `result.status === 'purchased'` was ALWAYS false after a
+ * successful buy, `result.entitlement` was always `undefined`, and the other three statuses were
+ * unreachable because a cancel / pending / failure **throws** natively and arrives here as a promise
+ * REJECTION, never as a resolved value. Every `switch (result.status)` a host wrote fell through to
+ * `default`.
+ *
+ * There is no `status` field because there is nothing for it to say: a resolved promise IS
+ * "purchased", and anything else rejected.
+ */
+export type TransactionInfo = {
+  /** App Store / Play transaction identifier. */
+  transactionId: string;
+  productId: string;
+  /** ISO-8601. Android stores it as a string; iOS formats its `Date` to the same shape. */
+  purchaseDate: string;
+  /** `production` | `sandbox` (iOS also reports `xcode`). */
+  environment: string;
 };
 
+/**
+ * A store product, as the two mappers emit it.
+ *
+ * ⚠ There is no `price: number`. Neither mapper has ever emitted one — both send **`priceMicros`**
+ * (an integer: `9.99` → `9_990_000`), because iOS's native price is a `Decimal`, which is not
+ * bridge-legal, and shipping it as a lossy `Double` would be worse than an integer both platforms
+ * agree on. A host that wrote `product.price.toFixed(2)` against the old type crashed on
+ * `undefined`; show `displayPrice` (already localized and currency-formatted) or divide
+ * `priceMicros` by 1e6.
+ *
+ * The platform-specific keys are **omitted, never faked** (N11): an absent key means "this platform
+ * has no concept of it".
+ */
 export type ProductInfo = {
   id: string;
   name: string;
   description: string;
+  /** Localized, store-formatted price — e.g. "$9.99". The string to render. */
   displayPrice: string;
-  price: number;
+  /** Price × 1,000,000, as an integer. Both platforms. */
+  priceMicros: number;
+  /** ISO-4217. **Android only** — iOS's `ProductInfo` does not expose a currency code. */
+  currencyCode?: string;
+  /** **iOS only** — Play's `ProductDetails` does not surface this on the DTO. */
+  isSubscription?: boolean;
+  /** **Android only** — the base-plan offer token to pass back to `purchase()`. */
   offerToken?: string;
 };
 
@@ -81,12 +120,16 @@ export class AppDNABilling {
   /**
    * Purchase a product by its store product ID.
    * On Android, pass offerToken for subscription offers (base plan tokens).
+   *
+   * Resolves with the {@link TransactionInfo} on success. A user cancellation, a pending
+   * (deferred / ask-to-buy) purchase, and a store failure all **reject** — natively they throw, and
+   * the wrapper surfaces that as `PURCHASE_ERROR`. Catch the rejection; do not test a status field.
    */
   static async purchase(
     productId: string,
     offerToken?: string
-  ): Promise<PurchaseResult> {
-    return AppdnaBillingModule.purchase(productId, offerToken) as Promise<PurchaseResult>;
+  ): Promise<TransactionInfo> {
+    return AppdnaBillingModule.purchase(productId, offerToken) as Promise<TransactionInfo>;
   }
 
   /**

@@ -18,7 +18,7 @@ import type {
   AppDNAOptions,
 } from './types';
 import { AppDNABilling, resetEntitlementObserver } from './billing';
-import type { Entitlement, PurchaseResult, ProductInfo } from './billing';
+import type { Entitlement, TransactionInfo, ProductInfo } from './billing';
 import type {
   AppDNAOnboardingDelegate,
   AppDNAPaywallDelegate,
@@ -33,7 +33,9 @@ import type {
 
 export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
 export { AppDNABilling } from './billing';
-export type { Entitlement, PurchaseResult, ProductInfo } from './billing';
+// `PurchaseResult` is gone, not renamed: it described a `{status, entitlement}` union no native has
+// ever resolved. What `purchase()` actually resolves is a `TransactionInfo`; everything else rejects.
+export type { Entitlement, TransactionInfo, ProductInfo } from './billing';
 export { AppDNAPush } from './push';
 export { AppDNAScreenSlot } from './AppDNAScreenSlot';
 export type { AppDNAScreenSlotProps } from './AppDNAScreenSlot';
@@ -280,8 +282,17 @@ export class AppDNA {
 
   /** Onboarding module. */
   static onboarding = {
-    present: (flowId: string, context?: OnboardingContext): Promise<boolean> =>
-      AppdnaModule.presentOnboarding(flowId, context),
+    /**
+     * Present an onboarding flow. Resolves `false` when nothing could present it.
+     *
+     * ⚠ There is no `context` parameter any more. It used to accept an `OnboardingContext`
+     * (`experimentOverrides`, `source`, `campaign`, …), marshal it across the bridge, and be
+     * DISCARDED: neither native impl read it, and the SDKs' own
+     * `OnboardingModule.present(flowId:context:)` drops the argument on both platforms. A host that
+     * set `experimentOverrides` got a silent no-op. Removed rather than left lying; see
+     * `sdk-methods.ts`.
+     */
+    present: (flowId: string): Promise<boolean> => AppdnaModule.presentOnboarding(flowId),
     /** Set a delegate to receive onboarding lifecycle callbacks. */
     setDelegate: (delegate: AppDNAOnboardingDelegate): void => {
       // Replaces the previous delegate's listeners rather than stacking a second set on top.
@@ -614,8 +625,11 @@ export class AppDNA {
     /** Get localized product information from the store. */
     getProducts: (productIds: string[]): Promise<ProductInfo[]> =>
       AppDNABilling.getProducts(productIds),
-    /** Purchase a product by its store product ID. */
-    purchase: (productId: string, offerToken?: string): Promise<PurchaseResult> =>
+    /**
+     * Purchase a product by its store product ID. Resolves the store `TransactionInfo`; a
+     * cancellation, a pending purchase, or a store error REJECTS (`PURCHASE_ERROR`).
+     */
+    purchase: (productId: string, offerToken?: string): Promise<TransactionInfo> =>
       AppDNABilling.purchase(productId, offerToken),
     /** Restore previously purchased products. Resolves the restored product IDs, not entitlements. */
     restorePurchases: (): Promise<string[]> => AppDNABilling.restorePurchases(),
@@ -661,11 +675,7 @@ export class AppDNA {
   }
 }
 
-/** Context passed to onboarding flows for dynamic branching. */
-export interface OnboardingContext {
-  source?: string;
-  campaign?: string;
-  referrer?: string;
-  userProperties?: Record<string, unknown>;
-  experimentOverrides?: Record<string, string>;
-}
+// `OnboardingContext` used to be exported here and accepted by `AppDNA.onboarding.present`. It is
+// gone: no SDK — not this wrapper, not iOS, not Android — has ever read a single one of its fields.
+// Exporting a type whose only use is to be discarded is how a host spends an afternoon wondering why
+// `experimentOverrides` changed nothing. It comes back the day the core SDKs honour it.

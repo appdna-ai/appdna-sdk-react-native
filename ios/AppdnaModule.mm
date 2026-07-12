@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-ios-adapter.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 13c1ee7516018f38ce75906d0a56a89e0a16b34b
+// Last codegen commit: 4b9457572d2961caf11c76c3323445d4faff4d03
 
 #import <React/RCTAssert.h>
 #import <React/RCTBridgeModule.h>
@@ -265,11 +265,10 @@ RCT_EXPORT_MODULE()
 }
 
 - (void)presentOnboarding:(NSString *)flowId
-            context:(NSDictionary *)context
             resolve:(RCTPromiseResolveBlock )resolve
             reject:(RCTPromiseRejectBlock )reject
 {
-  [_impl presentOnboarding:flowId context:context resolve:resolve reject:reject];
+  [_impl presentOnboarding:flowId resolve:resolve reject:reject];
 }
 
 - (void)presentPaywall:(NSString *)paywallId

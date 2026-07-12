@@ -12,11 +12,18 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.module.annotations.ReactModule
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * SPEC-070-B P2 — the AppDNA TurboModule for Android.
@@ -71,8 +78,44 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
      */
     private var invoker: AppdnaVetoInvoker? = null
 
+    /**
+     * E6 — every promise a coroutine on [scope] owes an answer to.
+     *
+     * `invalidate()` calls `scope.cancel()`. A cancelled coroutine does not run the rest of its body,
+     * so an in-flight `configure` / `purchase` / `getProducts` / `restorePurchases` used to die
+     * WITHOUT calling `promise.reject` — and a JS promise that never settles hangs its `await` for
+     * the life of the process. A Metro reload mid-purchase left the host's checkout spinner turning
+     * forever, with no error anywhere to say why.
+     */
+    private val pendingPromises: MutableSet<SettleOncePromise> =
+        Collections.newSetFromMap(ConcurrentHashMap())
+
+    /**
+     * A promise that settles exactly once.
+     *
+     * Teardown races the coroutine it is tearing down: [invalidate] rejects what is pending while the
+     * cancelled coroutine may already be inside `promise.resolve`. Settling an RN Promise twice is a
+     * native-module error, so the winner is decided by a CAS rather than by luck.
+     */
+    private class SettleOncePromise(private val promise: Promise) {
+        private val settled = AtomicBoolean(false)
+
+        fun resolve(value: Any?) {
+            if (settled.compareAndSet(false, true)) promise.resolve(value)
+        }
+
+        fun reject(code: String, message: String?, cause: Throwable? = null) {
+            if (settled.compareAndSet(false, true)) promise.reject(code, message, cause)
+        }
+    }
+
     companion object {
         const val NAME = "AppdnaModule"
+
+        /** E6 — what a host sees when the bridge is torn down under an in-flight call. */
+        internal const val INVALIDATED_CODE = "SDK_INVALIDATED"
+        internal const val INVALIDATED_MESSAGE =
+            "The AppDNA native module was torn down (reload or shutdown) before this call completed."
 
         /**
          * SPEC-070-B §7 — pinned literal, underscore not hyphen. Injected UNCONDITIONALLY in the
@@ -92,6 +135,50 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
          * envelope reported a version that had not been released for two cycles, and nothing noticed.
          */
         private const val WRAPPER_VERSION = "1.0.8"
+    }
+
+    // ── Promise-owning coroutines (E6) ────────────────────────────────────────
+
+    /**
+     * Run [block] on [scope], and guarantee the promise settles — including when the scope dies.
+     *
+     * Three ways a promise used to be abandoned, all of them fixed here:
+     *   1. the coroutine is cancelled mid-flight (Metro reload) → `CancellationException` → reject;
+     *   2. `invalidate()` cancels a coroutine that is suspended and never resumes → [rejectPending];
+     *   3. the scope was ALREADY cancelled when the call arrived → `scope.launch` returns a job whose
+     *      body never runs at all (no exception, no `finally`) → the `isActive` check below.
+     */
+    private fun launchSettling(
+        promise: Promise,
+        errorCode: String,
+        dispatcher: CoroutineContext = EmptyCoroutineContext,
+        block: suspend (SettleOncePromise) -> Unit,
+    ) {
+        val pending = SettleOncePromise(promise)
+        pendingPromises.add(pending)
+        scope.launch(dispatcher) {
+            try {
+                block(pending)
+            } catch (e: CancellationException) {
+                // `invalidate()` has almost certainly rejected this one already — the CAS makes that a
+                // no-op — but a coroutine can be cancelled on its own, and an unsettled promise is
+                // worse than any error code.
+                pending.reject(INVALIDATED_CODE, INVALIDATED_MESSAGE, e)
+                throw e
+            } catch (e: Throwable) {
+                pending.reject(errorCode, e.message, e)
+            } finally {
+                pendingPromises.remove(pending)
+            }
+        }
+        if (!scope.isActive) rejectPending()
+    }
+
+    /** Reject every promise still owed an answer. Idempotent: [SettleOncePromise] settles once. */
+    private fun rejectPending() {
+        val snapshot = pendingPromises.toList()
+        pendingPromises.removeAll(snapshot.toSet())
+        snapshot.forEach { it.reject(INVALIDATED_CODE, INVALIDATED_MESSAGE) }
     }
 
     // ── Lifecycle / core ──────────────────────────────────────────────────────
@@ -126,14 +213,10 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
             return
         }
 
-        scope.launch(Dispatchers.Default) {
-            try {
-                AppDNA.configure(reactContext, apiKey, environment, parsed)
-                registerDelegates(parsed.vetoTimeout)
-                promise.resolve(null)
-            } catch (e: Throwable) {
-                promise.reject("CONFIGURE_ERROR", e.message, e)
-            }
+        launchSettling(promise, "CONFIGURE_ERROR", Dispatchers.Default) { p ->
+            AppDNA.configure(reactContext, apiKey, environment, parsed)
+            registerDelegates(parsed.vetoTimeout)
+            p.resolve(null)
         }
     }
 
@@ -263,7 +346,14 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
 
     // ── Onboarding / paywall / surveys / messages ─────────────────────────────
 
-    override fun presentOnboarding(flowId: String, context: ReadableMap?, promise: Promise) {
+    /**
+     * ⚠ No `context` parameter. It had one — and never read it. `AppDNA.presentOnboarding` takes no
+     * context, and `OnboardingModule.present(activity, flowId, context)` drops the argument it is
+     * given (AppDNAModules.kt), so there was nothing to forward it TO. A host that passed
+     * `experimentOverrides` got a silent no-op on both platforms. Removed from the IR
+     * (`sdk-methods.ts`) rather than left as a parameter that does nothing.
+     */
+    override fun presentOnboarding(flowId: String, promise: Promise) {
         // E10: dispatch onto the UI thread so native's own main-looper check takes the latch-free
         // path. Blocking here would freeze the JS thread for the latch's five seconds.
         val activity = reactContext.currentActivity ?: return promise.resolve(false)
@@ -406,57 +496,43 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         // silent no-op would look like a user who dismissed the sheet.
         val activity = reactContext.currentActivity
             ?: return promise.reject("NO_ACTIVITY", "purchase() requires a foreground Activity")
-        scope.launch {
-            try {
-                val options = offerToken?.let { ai.appdna.sdk.billing.PurchaseOptions(offerToken = it) }
-                val result = AppDNA.billing.purchase(activity, productId, options)
-                promise.resolve(AppdnaBridge.toWritableMap(AppdnaMappers.map(result)))
-            } catch (e: Throwable) {
-                promise.reject("PURCHASE_ERROR", e.message, e)
-            }
+        val options = offerToken?.let { ai.appdna.sdk.billing.PurchaseOptions(offerToken = it) }
+        launchSettling(promise, "PURCHASE_ERROR") { p ->
+            val result = AppDNA.billing.purchase(activity, productId, options)
+            p.resolve(AppdnaBridge.toWritableMap(AppdnaMappers.map(result)))
         }
     }
 
     override fun restorePurchases(promise: Promise) {
-        scope.launch {
-            try {
-                // `List<String>` — restored product ids, NOT entitlements.
-                promise.resolve(AppdnaBridge.toWritableArray(AppDNA.billing.restorePurchases()))
-            } catch (e: Throwable) {
-                promise.reject("RESTORE_ERROR", e.message, e)
-            }
+        launchSettling(promise, "RESTORE_ERROR") { p ->
+            // `List<String>` — restored product ids, NOT entitlements.
+            p.resolve(AppdnaBridge.toWritableArray(AppDNA.billing.restorePurchases()))
         }
     }
 
     override fun getProducts(productIds: ReadableArray, promise: Promise) {
-        scope.launch {
-            try {
-                val products = AppDNA.billing.getProducts(AppdnaBridge.toStringList(productIds))
-                promise.resolve(AppdnaBridge.toWritableArray(products.map { AppdnaMappers.map(it) }))
-            } catch (e: Throwable) {
-                promise.reject("PRODUCTS_ERROR", e.message, e)
-            }
+        // Read the ReadableArray HERE, on the thread the bridge delivered it on — the same invariant
+        // `configure` and `presentPaywall` state and honour. Reading it inside `scope.launch` reads it
+        // after this method has RETURNED, from another thread, which is undefined behaviour: the
+        // bridge may already have recycled the backing buffer, so `getProducts([...])` could query the
+        // store for a garbled or empty id list and resolve `[]` with no error anywhere.
+        val ids = AppdnaBridge.toStringList(productIds)
+        launchSettling(promise, "PRODUCTS_ERROR") { p ->
+            val products = AppDNA.billing.getProducts(ids)
+            p.resolve(AppdnaBridge.toWritableArray(products.map { AppdnaMappers.map(it) }))
         }
     }
 
     override fun hasActiveSubscription(promise: Promise) {
-        scope.launch {
-            try {
-                promise.resolve(AppDNA.billing.hasActiveSubscription())
-            } catch (e: Throwable) {
-                promise.reject("SUBSCRIPTION_ERROR", e.message, e)
-            }
+        launchSettling(promise, "SUBSCRIPTION_ERROR") { p ->
+            p.resolve(AppDNA.billing.hasActiveSubscription())
         }
     }
 
     override fun getEntitlements(promise: Promise) {
-        scope.launch {
-            try {
-                val entitlements = AppDNA.billing.getEntitlements()
-                promise.resolve(AppdnaBridge.toWritableArray(entitlements.map { AppdnaMappers.map(it) }))
-            } catch (e: Throwable) {
-                promise.reject("ENTITLEMENTS_ERROR", e.message, e)
-            }
+        launchSettling(promise, "ENTITLEMENTS_ERROR") { p ->
+            val entitlements = AppDNA.billing.getEntitlements()
+            p.resolve(AppdnaBridge.toWritableArray(entitlements.map { AppdnaMappers.map(it) }))
         }
     }
 
@@ -477,12 +553,8 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
 
     /** ⚠ The namespace is `AppDNA.push` on Android and `AppDNA.pushModule` on iOS — a naming split. */
     override fun requestPushPermission(promise: Promise) {
-        scope.launch {
-            try {
-                promise.resolve(AppDNA.push.requestPermission(reactContext.currentActivity))
-            } catch (e: Throwable) {
-                promise.reject("PUSH_PERMISSION_ERROR", e.message, e)
-            }
+        launchSettling(promise, "PUSH_PERMISSION_ERROR") { p ->
+            p.resolve(AppDNA.push.requestPermission(reactContext.currentActivity))
         }
     }
 
@@ -559,7 +631,20 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         invoker = veto
 
         AppDNA.onboarding.setDelegate(OnboardingForwarder(emitter, veto))
-        AppDNA.paywall.setDelegate(PaywallForwarder(emitter, veto) { block -> scope.launch { block() } })
+        // Returns FALSE when the scope is already dead. `scope.launch` on a cancelled scope creates a
+        // job whose body never runs — no exception, no `finally` — so a promo-code veto launched after
+        // teardown would leave native's `completion` uncalled and the promo field spinning forever.
+        // The forwarder answers `false` (reject the code) when this says the veto could not run.
+        AppDNA.paywall.setDelegate(
+            PaywallForwarder(emitter, veto) { block ->
+                if (!scope.isActive) {
+                    false
+                } else {
+                    scope.launch { block() }
+                    true
+                }
+            },
+        )
         AppDNA.surveys.setDelegate(SurveyForwarder(emitter))
         AppDNA.inAppMessages.setDelegate(InAppMessageForwarder(emitter))
         AppDNA.push.setDelegate(PushForwarder(emitter))
@@ -678,6 +763,13 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
      * ⚠ Fast Refresh runs neither `invalidate()` nor `configure()`. Only a true reload does.
      */
     override fun invalidate() {
+        // FIRST, before anything can throw: settle every promise a coroutine on `scope` still owes an
+        // answer to. `scope.cancel()` below kills those coroutines where they stand, and a JS promise
+        // that is neither resolved nor rejected hangs its `await` for the life of the process — a
+        // reload mid-purchase used to leave the host's checkout spinner turning with no error to
+        // explain it.
+        rejectPending()
+
         entitlementListener?.let { AppDNA.billing.removeEntitlementsChangedListener(it) }
         entitlementListener = null
 

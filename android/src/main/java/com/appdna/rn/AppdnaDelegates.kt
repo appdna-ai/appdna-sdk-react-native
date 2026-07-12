@@ -166,8 +166,13 @@ internal class OnboardingForwarder(
 internal class PaywallForwarder(
     private val emitter: AppdnaEventEmitter,
     private val invoker: AppdnaVetoInvoker,
-    /** The SDK's `onPromoCodeSubmit` is completion-based, so the veto needs a coroutine to live in. */
-    private val launchVeto: (suspend () -> Unit) -> Unit,
+    /**
+     * The SDK's `onPromoCodeSubmit` is completion-based, so the veto needs a coroutine to live in.
+     *
+     * Returns `false` when it could not launch one — the module's scope is already cancelled
+     * (teardown / reload). The caller must then answer the veto itself; see [onPromoCodeSubmit].
+     */
+    private val launchVeto: (suspend () -> Unit) -> Boolean,
 ) : AppDNAPaywallDelegate {
 
     override fun onPaywallPresented(paywallId: String) {
@@ -226,10 +231,29 @@ internal class PaywallForwarder(
      * repeat.
      */
     override fun onPromoCodeSubmit(paywallId: String, code: String, completion: (Boolean) -> Unit) {
-        launchVeto {
-            val reply = invoker.invoke("onPromoCodeSubmit", mapOf("paywallId" to paywallId, "code" to code))
-            completion(reply as? Boolean ?: false)
+        // E6 — `completion` MUST be called exactly once, on every path. The veto runs on the module's
+        // coroutine scope, and that scope dies on teardown: before this, a reload mid-veto (or a code
+        // submitted after one) left `completion` uncalled and the paywall's promo field spinning
+        // forever, with no way for the user to cancel out of it. Every abandonment path now answers
+        // with the hook's own safe default — REJECT the code, because "nobody validated it" can only
+        // honestly read as invalid.
+        val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+        val answerOnce: (Boolean) -> Unit = { valid ->
+            if (answered.compareAndSet(false, true)) completion(valid)
         }
+        val launched = launchVeto {
+            try {
+                val reply = invoker.invoke("onPromoCodeSubmit", mapOf("paywallId" to paywallId, "code" to code))
+                answerOnce(reply as? Boolean ?: false)
+            } finally {
+                // Runs on cancellation too: a coroutine cancelled while suspended inside `invoke`
+                // unwinds through here, and the CAS makes a normal answer above idempotent.
+                answerOnce(false)
+            }
+        }
+        // The scope was already dead: `scope.launch` created a job whose body never ran, so the
+        // `finally` above never will either.
+        if (!launched) answerOnce(false)
     }
 
     private fun errorMessage(error: Throwable): String = error.message ?: error.toString()

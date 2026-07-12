@@ -2,6 +2,7 @@ package com.appdna.rn
 
 import ai.appdna.sdk.screens.AppDNAScreenSlot
 import android.content.Context
+import android.view.View
 import android.widget.FrameLayout
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
@@ -39,22 +40,47 @@ import com.facebook.react.uimanager.events.EventDispatcher
  * to RESUMED and wired onto the ComposeView BEFORE `setContent`. Identical shim to
  * `AppDNAScreenSlotViewFactory.kt` in the Flutter plugin.
  */
-class AppdnaScreenSlotView(context: Context) : FrameLayout(context) {
+class AppdnaScreenSlotView internal constructor(
+    context: Context,
+    /**
+     * Test seam. `null` (the production path, and the only public constructor) builds the real
+     * `ComposeView`. A unit test injects a `View` with a known intrinsic height instead, so the
+     * measurement contract below can be asserted without standing up a Compose host.
+     */
+    injectedContent: View?,
+) : FrameLayout(context) {
+
+    constructor(context: Context) : this(context, null)
 
     private val lifecycleOwner = SlotViewTreeOwner()
     private var slotName: String = ""
     private var lastReportedWidth = -1
     private var lastReportedHeight = -1
 
-    private val composeView: ComposeView = ComposeView(context).apply {
-        lifecycleOwner.start()
-        setViewTreeLifecycleOwner(lifecycleOwner)
-        setViewTreeViewModelStoreOwner(lifecycleOwner)
-        setViewTreeSavedStateRegistryOwner(lifecycleOwner)
-    }
+    private val composeView: ComposeView? =
+        if (injectedContent != null) {
+            null
+        } else {
+            ComposeView(context).apply {
+                lifecycleOwner.start()
+                setViewTreeLifecycleOwner(lifecycleOwner)
+                setViewTreeViewModelStoreOwner(lifecycleOwner)
+                setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+            }
+        }
+
+    /** The single child whose CONTENT height is measured and reported. */
+    private val contentView: View = composeView ?: injectedContent!!
+
+    /**
+     * Test seam for [emitContentSize]. When set, the measured size (in raw PIXELS) is handed here
+     * instead of being dispatched through the Fabric `EventDispatcher` — which needs a `ReactContext`
+     * and an initialised `DisplayMetricsHolder` that a unit test does not have.
+     */
+    internal var contentSizeReporter: ((widthPx: Int, heightPx: Int) -> Unit)? = null
 
     init {
-        addView(composeView)
+        addView(contentView)
         renderSlot()
     }
 
@@ -66,27 +92,79 @@ class AppdnaScreenSlotView(context: Context) : FrameLayout(context) {
     }
 
     private fun renderSlot() {
-        composeView.setContent {
+        composeView?.setContent {
             AppDNAScreenSlot(name = slotName)
         }
     }
 
     /**
-     * After Compose measures its content, report the size to JS. Fabric will not lay this view out to
-     * its content, so the facade sizes the Yoga node from what we send here. Deduped so a stable
-     * content does not spam the bridge every frame.
+     * Report the CONTENT's height to JS. Fabric will not lay this view out to its content, so the
+     * facade sizes the Yoga node from what we send here. Deduped so a stable content does not spam the
+     * bridge every frame.
+     *
+     * ## Why this must MEASURE and not read `contentView.height`
+     *
+     * It used to report `composeView.width/height` — the child's LAID-OUT size. That made the slot a
+     * height fixed-point and it was permanently blank:
+     *
+     *  - `contentView` is a MATCH_PARENT child of this FrameLayout;
+     *  - Fabric lays THIS view out to exactly the height Yoga computed, and Yoga computes it from the
+     *    JS `height` style — which `AppDNAScreenSlot.tsx` sets to `measuredHeight ?? minHeight`, i.e.
+     *    to whatever we last reported;
+     *  - so `contentView.height == this.height == the height we last emitted`.
+     *
+     * Steady state: emit 0 → JS sets 0 → next layout measures 0 → emit 0, forever. With
+     * `minHeight={120}` it reported 120 regardless of the content. The content's own size never
+     * entered the loop.
+     *
+     * So the content is measured UNCONSTRAINED in the vertical axis, at the width actually available —
+     * the same contract as iOS, which fits its SwiftUI content with `systemLayoutSizeFitting` at
+     * `.required` horizontal / `.fittingSizeLevel` vertical priority
+     * (`ios/AppdnaScreenSlotHostView.swift`).
      */
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        val contentWidth = composeView.width
-        val contentHeight = composeView.height
-        if (contentWidth == lastReportedWidth && contentHeight == lastReportedHeight) return
-        lastReportedWidth = contentWidth
+
+        System.err.println("PROBE onLayout changed=$changed l=$left t=$top r=$right b=$bottom")
+        val availableWidth = right - left
+        // Not laid out yet: an UNSPECIFIED-width probe would measure content against infinity and
+        // report a height for a line length that will never exist on screen.
+        if (availableWidth <= 0) return
+
+        contentView.measure(
+            MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+        )
+        val contentHeight = contentView.measuredHeight
+
+        // Restore the child's measured state to the bounds `super.onLayout` actually laid it out to.
+        // The probe above is a query, not a resize; leaving it as the child's measured size would
+        // publish the unconstrained height to anything that reads it before the next measure pass.
+        contentView.measure(
+            MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(bottom - top, MeasureSpec.EXACTLY),
+        )
+
+        // Compose measures asynchronously: the first layout after `setContent` can land before the
+        // first composition and measure 0. Emitting that 0 would collapse the slot to zero height for
+        // a frame — the exact layout shift `minHeight` (W19) exists to prevent — so the pre-content 0
+        // is swallowed and JS keeps its reserved height. Once a real height HAS been reported, a later
+        // 0 is a genuine collapse (the slot published nothing) and is forwarded.
+        if (contentHeight <= 0 && lastReportedHeight <= 0) return
+
+        // Dedupe. Also what breaks the measure→emit→relayout cycle: JS applies the height we send,
+        // this view is laid out again, the content still measures the same, and we go quiet.
+        if (availableWidth == lastReportedWidth && contentHeight == lastReportedHeight) return
+        lastReportedWidth = availableWidth
         lastReportedHeight = contentHeight
-        emitContentSize(contentWidth, contentHeight)
+        emitContentSize(availableWidth, contentHeight)
     }
 
     private fun emitContentSize(widthPx: Int, heightPx: Int) {
+        contentSizeReporter?.let {
+            it(widthPx, heightPx)
+            return
+        }
         val reactContext = context as? ReactContext ?: return
         val dispatcher: EventDispatcher =
             UIManagerHelper.getEventDispatcherForReactTag(reactContext, id) ?: return
@@ -105,7 +183,7 @@ class AppdnaScreenSlotView(context: Context) : FrameLayout(context) {
 
     /** Tear down Compose + the backing owner when the view is detached for good. */
     fun onDropView() {
-        composeView.disposeComposition()
+        composeView?.disposeComposition()
         lifecycleOwner.destroy()
     }
 
