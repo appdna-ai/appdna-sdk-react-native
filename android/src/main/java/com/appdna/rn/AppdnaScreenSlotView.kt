@@ -3,6 +3,8 @@ package com.appdna.rn
 import ai.appdna.sdk.screens.AppDNAScreenSlot
 import android.content.Context
 import android.view.View
+import android.view.View.MeasureSpec
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
@@ -122,10 +124,72 @@ class AppdnaScreenSlotView internal constructor(
      * `.required` horizontal / `.fittingSizeLevel` vertical priority
      * (`ios/AppdnaScreenSlotHostView.swift`).
      */
+    /**
+     * 🔴 MEASURING IN `onLayout` ALONE IS NOT ENOUGH — NOTHING EVER CALLS IT AGAIN.
+     *
+     * This view's `onLayout` is invoked by its PARENT, and its parent is a React view:
+     *
+     *     // ReactViewGroup.java:217
+     *     protected void onLayout(boolean changed, int l, int t, int r, int b) {
+     *         // No-op since UIManagerModule handles actually laying out children.
+     *     }
+     *
+     * So when Compose finishes composing the real content and calls `requestLayout()`, the traversal
+     * runs, the React parent lays out NOTHING, and our `onLayout` never fires. It re-fires only when
+     * Fabric mounts new layout metrics — i.e. only in response to a height WE emitted.
+     *
+     * The consequence, on the normal path: `AppDNAScreenSlot` loads its config asynchronously, so the
+     * first (and only) measure sees the loading shimmer — a fixed 100dp. We emit 100, JS applies 100,
+     * we dedupe, and we go quiet. The real 340dp content then composes and we never hear about it. The
+     * slot displays a 100dp window onto the screen, forever. Same for every later content change: an
+     * image finishing, a server-driven expand, content shrinking.
+     *
+     * `requestLayout()` is the re-entry point Compose actually calls, so that is where we hook. Posting
+     * our own measure+layout pass is the standard RN escape hatch for a self-measuring child.
+     */
+    /**
+     * The re-entry point, and it took three attempts to find one that actually fires.
+     *
+     * ① `onLayout` alone is not enough: this view's `onLayout` is called by its PARENT, and the parent
+     *    is a React view — `ReactViewGroup.onLayout` is literally `// No-op since UIManagerModule
+     *    handles actually laying out children.` So when Compose composes the real content, our
+     *    `onLayout` never runs. The slot measures the loading shimmer once and freezes there.
+     * ② Overriding `requestLayout()` does not fire either: `View.requestLayout()` propagates to the
+     *    parent only `if (!mParent.isLayoutRequested())`, and during a pending traversal it already is
+     *    — so the call is swallowed before it reaches us.
+     * ③ A pre-draw listener always runs. Compose cannot change what is on screen without a draw, so
+     *    this cannot be missed. The dedupe below makes it nearly free: an unchanged content is a
+     *    measure-cache hit and reports nothing.
+     */
+    private val preDraw = ViewTreeObserver.OnPreDrawListener {
+        onContentMayHaveResized()
+        true
+    }
+
+    /**
+     * Exactly what the pre-draw listener calls — not a parallel path. A test drives THIS, and asserts
+     * separately that attaching registers the listener, because Robolectric will not run a real draw
+     * pass. The composition of the two is what the device e2e proves.
+     */
+    internal fun onContentMayHaveResized() = measureAndReportContent(width)
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnPreDrawListener(preDraw)
+    }
+
+    override fun onDetachedFromWindow() {
+        viewTreeObserver.removeOnPreDrawListener(preDraw)
+        super.onDetachedFromWindow()
+    }
+
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
+        measureAndReportContent(availableWidth = right - left, laidOutHeight = bottom - top)
+    }
 
-        val availableWidth = right - left
+    /** Measure the content unconstrained at [availableWidth] and report it if it changed. */
+    private fun measureAndReportContent(availableWidth: Int, laidOutHeight: Int = height) {
         // Not laid out yet: an UNSPECIFIED-width probe would measure content against infinity and
         // report a height for a line length that will never exist on screen.
         if (availableWidth <= 0) return
@@ -144,7 +208,7 @@ class AppdnaScreenSlotView internal constructor(
         // publish the unconstrained height to anything that reads it before the next measure pass.
         contentView.measure(
             MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(bottom - top, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(laidOutHeight, MeasureSpec.EXACTLY),
         )
 
         // Compose measures asynchronously: the first layout after `setContent` can land before the

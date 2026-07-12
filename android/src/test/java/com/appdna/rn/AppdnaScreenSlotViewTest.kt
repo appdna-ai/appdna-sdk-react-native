@@ -1,6 +1,8 @@
 package com.appdna.rn
 
 import android.content.Context
+import android.app.Activity
+import android.os.Looper
 import android.view.View
 import android.widget.FrameLayout
 import org.junit.Assert.assertEquals
@@ -9,6 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 
 /**
  * SPEC-070-B P4 — the height contract of [AppdnaScreenSlotView].
@@ -187,5 +190,46 @@ class AppdnaScreenSlotViewTest {
         layoutHost(view, widthPx = 0, hostHeightPx = 0)
 
         assertTrue(reported.isEmpty())
+    }
+
+    /**
+     * 🔴 THE ONE THE OTHER TESTS COULD NOT CATCH.
+     *
+     * Every test above calls `layoutHost(...)` — i.e. it invokes `onLayout` by hand. In a REAL app
+     * nothing does that. This view's `onLayout` is called by its parent, and its parent is a React
+     * view whose `onLayout` is `// No-op since UIManagerModule handles actually laying out children.`
+     * (ReactViewGroup.java:217). So when Compose finishes composing the real content and calls
+     * `requestLayout()`, our `onLayout` NEVER RUNS.
+     *
+     * The normal path: AppDNAScreenSlot loads its config asynchronously, so the first measure sees the
+     * loading shimmer (a fixed 100dp). We emit 100, JS applies 100, we dedupe, we go quiet — and the
+     * real 340dp content composes into a 100dp window, forever.
+     *
+     * So this test never calls `onLayout` after the first pass. It changes the content's height and
+     * calls `requestLayout()`, exactly as Compose does, and requires a fresh report.
+     */
+    @Test
+    fun reMeasuresWhenComposeInvalidatesItself_withNoFurtherLayoutFromTheParent() {
+        val reported = mutableListOf<Pair<Int, Int>>()
+        val (view, content) = slot(contentHeightPx = 100, reported = reported)
+
+        // First and ONLY parent-driven layout: the async config has not arrived, so this is the shimmer.
+        layoutHost(view, widthPx = 1080, hostHeightPx = 0)
+        assertEquals(listOf(1080 to 100), reported)
+
+        // The config arrives; Compose composes the real content and invalidates itself. The React
+        // parent will not lay us out again — the view must re-enter on its own.
+        // The setter calls requestLayout(), exactly as Compose does. Compose cannot change what is on
+        // screen without a draw, so the pre-draw pass is what must notice.
+        content.intrinsicHeightPx = 340
+
+        // What the registered pre-draw listener calls.
+        view.onContentMayHaveResized()
+
+        assertEquals(
+            "the slot froze at the shimmer height — a 100px window onto 340px of content",
+            listOf(1080 to 100, 1080 to 340),
+            reported,
+        )
     }
 }
