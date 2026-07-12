@@ -51,9 +51,12 @@ npm view @appdna-ai/react-native-sdk@1.0.6 deprecated
 - **No `npm unpublish`.** Unpublishing breaks every existing lockfile that references those
   versions, including CI for anyone who pinned one. A loud deprecation warning achieves the goal
   without breaking builds that currently succeed.
-- **`@appdna/react-native-sdk` (no `-ai`) is not touched.** It has never existed — npm 404s it. It
-  appeared only in docs and two console wizards, both fixed. There is nothing on the registry to
-  deprecate, and `check:sdk-framework-registry` now fails the build if that string reappears.
+- **The un-namespaced `@appdna/` scope (no `-ai`) is not touched.** The RN package under that scope
+  has never existed — npm 404s it. It appeared only in docs and two console wizards, both fixed.
+  There is nothing on the registry to deprecate, and `check:sdk-framework-registry` now fails the
+  build if that dead coordinate reappears anywhere — including here, which is why this line no longer
+  spells it out. (The gate has no suppression marker, by design: an escape hatch in a coordinate lint
+  is how the dead coordinate gets back in.)
 
 ---
 
