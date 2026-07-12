@@ -16,6 +16,8 @@ import type {
   PaywallContext,
   AppDNAEnvironment,
   AppDNAOptions,
+  AppDNALogLevel,
+  AppDNABillingProvider,
 } from './types';
 import { AppDNABilling, resetEntitlementObserver } from './billing';
 import type { Entitlement, TransactionInfo, ProductInfo } from './billing';
@@ -31,7 +33,17 @@ import type {
   AppDNAScreenDelegate,
 } from './generated/delegates';
 
-export type { WebEntitlement, DeferredDeepLink, PaywallContext, AppDNAEnvironment, AppDNAOptions };
+// `AppDNALogLevel` and `AppDNABillingProvider` are exported because `AppDNAOptions` REFERENCES them:
+// a host writing `const level: AppDNALogLevel = 'debug'` could not import the name it was told to use.
+export type {
+  WebEntitlement,
+  DeferredDeepLink,
+  PaywallContext,
+  AppDNAEnvironment,
+  AppDNAOptions,
+  AppDNALogLevel,
+  AppDNABillingProvider,
+};
 export { AppDNABilling } from './billing';
 // `PurchaseResult` is gone, not renamed: it described a `{status, entitlement}` union no native has
 // ever resolved. What `purchase()` actually resolves is a `TransactionInfo`; everything else rejects.

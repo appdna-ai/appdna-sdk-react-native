@@ -57,6 +57,7 @@ const mockModule = {
   // `List<String>` — restored product IDs. NOT `Entitlement[]`, whatever the docs used to say.
   restorePurchases: jest.fn(async () => ['premium_monthly']),
   presentOnboarding: jest.fn(async () => true),
+  presentPaywall: jest.fn(async () => undefined),
   // The sentinel `requireNativeModule` checks to detect the legacy bridge.
   onInitDegraded: () => ({ remove: () => undefined }),
 };
@@ -155,5 +156,33 @@ describe('presentOnboarding takes a flowId and nothing else', () => {
     // @ts-expect-error — the dead `context` parameter is gone from the public signature. If it ever
     // returns, it must be because a native reads it.
     await AppDNA.onboarding.present('welcome', { experimentOverrides: { exp_1: 'variant_b' } });
+  });
+});
+
+/**
+ * 🔴 `PaywallContext.experiment` / `.variant` were absent from the TS type while BOTH natives parsed
+ * them (ios/AppdnaModuleImpl.swift:766-767, android/.../AppdnaModule.kt:847-848). TypeScript rejects
+ * an excess property, so a JS host could not send them at all — the native side was reading fields the
+ * wrapper made it impossible to provide. Nothing crashed and nothing logged; the paywall simply was
+ * never attributed to the experiment that served it.
+ *
+ * This asserts the WIRE, not the type: that all four fields survive the crossing. A type-only fix with
+ * no test is how the surface went dead in the first place.
+ */
+describe('PaywallContext carries every field the natives read', () => {
+  it('experiment and variant reach the native module', async () => {
+    await AppDNA.paywall.present('pw_1', {
+      placement: 'upgrade',
+      experiment: 'exp_pricing_q3',
+      variant: 'treatment_b',
+      customData: { source: 'settings' },
+    });
+
+    expect(mockModule.presentPaywall).toHaveBeenCalledWith('pw_1', {
+      placement: 'upgrade',
+      experiment: 'exp_pricing_q3',
+      variant: 'treatment_b',
+      customData: { source: 'settings' },
+    });
   });
 });

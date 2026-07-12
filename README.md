@@ -21,10 +21,14 @@ AppDNA gives you a single drop-in SDK for the growth surfaces every subscription
 
 ## Requirements
 
-- React Native 0.72+
+- **React Native 0.76.4+ with the New Architecture enabled.** The SDK ships a TurboModule and a
+  Fabric component; there is no legacy-bridge fallback, and it will not link on the old architecture.
 - React 18.0+
 - iOS 16.0+ (when targeting iOS)
 - Android API 24+ (when targeting Android)
+
+> **Versions 1.0.6 and earlier shipped no podspec and no Android Gradle module** and could not be
+> linked into an app at all. Install `1.0.8` or later.
 
 ## Installation
 
@@ -34,24 +38,30 @@ npm install @appdna-ai/react-native-sdk
 yarn add @appdna-ai/react-native-sdk
 ```
 
-For iOS, also run:
+For iOS, install the pods with the New Architecture switched on:
 
 ```bash
-cd ios && pod install
+cd ios && RCT_NEW_ARCH_ENABLED=1 pod install && cd ..
 ```
+
+On Android, set `newArchEnabled=true` in `android/gradle.properties`.
+
+**Expo:** the package ships a config plugin — add `"plugins": ["@appdna-ai/react-native-sdk"]` to
+`app.json` and run `npx expo prebuild`. Expo Go cannot host a native module; use a development build.
 
 ## Quick start
 
 ```typescript
 import { AppDNA } from '@appdna-ai/react-native-sdk';
 
-await AppDNA.configure('YOUR_API_KEY');
+// Positional args: apiKey, environment, options. The environment is 'production' | 'sandbox'.
+await AppDNA.configure('adn_live_xxx', 'production', { logLevel: 'warning' });
 ```
 
-Track an event:
+Track an event (fire-and-forget — it returns `void`, not a Promise):
 
 ```typescript
-await AppDNA.track('subscription_viewed', { plan_id: 'premium_monthly' });
+AppDNA.track('subscription_viewed', { plan_id: 'premium_monthly' });
 ```
 
 Identify a user (after sign-in):
@@ -60,21 +70,30 @@ Identify a user (after sign-in):
 await AppDNA.identify('user-123', { plan: 'premium' });
 ```
 
-Present a paywall:
+Present a paywall. Presentation and its outcome are two different things: `present()` resolves once
+the paywall is on screen, and what the user then does arrives on the delegate.
 
 ```typescript
-const result = await AppDNA.presentPaywall({ id: 'default' });
-switch (result.status) {
-  case 'purchased':
-    console.log('Purchased');
-    break;
-  case 'dismissed':
-    console.log('Dismissed');
-    break;
-  case 'failed':
-    console.error('Failed:', result.error);
-    break;
-}
+import { AppDNA, type AppDNAPaywallDelegate } from '@appdna-ai/react-native-sdk';
+
+const delegate: AppDNAPaywallDelegate = {
+  onPaywallPresented: () => {},
+  onPaywallAction: () => {},
+  onPaywallPurchaseStarted: () => {},
+  onPaywallPurchaseCompleted: (paywallId, productId) => console.log('Purchased', productId),
+  // `error` is a message string, and `errorType` is the stable reason code
+  // (userCancelled | networkError | serverError | …). `productId` is null if none was selected.
+  onPaywallPurchaseFailed: (paywallId, error, errorType) => console.log('Failed:', errorType, error),
+  onPaywallRestoreStarted: () => {},
+  onPaywallRestoreCompleted: () => {},
+  onPaywallRestoreFailed: () => {},
+  onPostPurchaseDeepLink: () => {},
+  onPostPurchaseNextStep: () => {},
+  onPaywallDismissed: () => {},
+};
+
+AppDNA.paywall.setDelegate(delegate);
+await AppDNA.paywall.present('default', { placement: 'settings' });
 ```
 
 ## Documentation

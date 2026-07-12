@@ -6,56 +6,164 @@
  *
  * ## What this plugin must do, and what it must not
  *
- * **Android: nothing.** The SDK's library `AndroidManifest.xml` auto-merges into the host. A plugin
- * that also wrote application-level attributes would break manifest-merge for any app declaring its
- * own — which is exactly why the wrapper's manifest is empty.
+ * **Both platforms: the New Architecture.** `src/nativeModule.ts` refuses to run on the legacy
+ * bridge — the TurboModule resolves there, but its event emitters do not exist, so every SDK
+ * callback would be silently dead. Expo SDK 52 leaves the New Architecture OPT-IN, so a plugin that
+ * did not switch it on handed every Expo host a `NEW_ARCH_ERROR` on the first facade call. That is
+ * the majority install path, and it was broken.
  *
- * **iOS: three things**, none of which Expo's defaults give you:
+ * **Android: New-Arch gradle property, and nothing else.** The SDK's library `AndroidManifest.xml`
+ * auto-merges into the host. A plugin that also wrote application-level attributes would break
+ * manifest-merge for any app declaring its own — which is why the wrapper's manifest is empty.
+ *
+ * **iOS: four things**, none of which Expo's defaults give you:
  *   1. `deploymentTarget → 16.0`. The core pod requires it (`AppDNASDK.podspec:15`); Expo 52
  *      defaults to 15.1, and CocoaPods resolves the floor, so the build fails at `pod install`.
- *   2. Firebase must link **statically**. The SDK depends on FirebaseFirestore; with Expo's default
- *      dynamic frameworks, Firebase's transitive static deps produce duplicate-symbol errors.
- *   3. Push entitlements — **only if the app uses push**. `AppDNA.swift:642` calls
+ *   2. Firebase's linkage. The SDK depends on FirebaseFirestore; the linkage is settled in
+ *      `example/ios/Podfile` by having run all three candidates — dynamic frameworks is the only one
+ *      that installs. `ios.useFrameworks: 'dynamic'` matches it.
+ *   3. **The Fabric screen-slot registration that dynamic frameworks compiles out.** See below —
+ *      this is the whole reason (2) cannot be set and forgotten.
+ *   4. Push entitlements — **only if the app uses push**. `AppDNA.swift:642` calls
  *      `registerForRemoteNotifications()`, so an app without `aps-environment` gets a runtime
  *      registration failure rather than a build error.
  *
+ * ## Why (3) exists, and why it is an AppDelegate mod
+ *
+ * React Native's codegen'd `RCTThirdPartyFabricComponentsProvider` wraps its whole component map in
+ * `#ifndef RCT_DYNAMIC_FRAMEWORKS`. Under `use_frameworks!` — which (2) forces — nothing registers
+ * `AppdnaScreenSlotView`, and `<AppDNAScreenSlot>` renders React's placeholder,
+ * `Unimplemented component: <AppdnaScreenSlotView>`. No throw. No warning. The bare example carries
+ * the override by hand (`example/ios/AppdnaExample/AppDelegate.mm`); an Expo app cannot, because
+ * `expo prebuild` REGENERATES the AppDelegate and destroys any hand edit. So the plugin has to write
+ * it on every prebuild, which is exactly what a mod is for.
+ *
+ * A **Swift** AppDelegate (Expo SDK 53+) is refused rather than blind-patched: the override's Swift
+ * signature is not the ObjC one, and shipping an unverified patch that silently fails to compile —
+ * or silently fails to register — would rebuild the defect this mod exists to close. Such a host
+ * gets a directed prebuild error with two real ways out.
+ *
  * @param {import('@expo/config-types').ExpoConfig} config
- * @param {{ enablePush?: boolean, deploymentTarget?: string }} [props]
+ * @param {{
+ *   enablePush?: boolean,
+ *   deploymentTarget?: string,
+ *   useFrameworks?: 'dynamic' | 'static',
+ *   screenSlot?: 'auto' | 'skip',
+ * }} [props]
  */
+const {
+  withPodfileProperties,
+  withGradleProperties,
+  withEntitlementsPlist,
+  withInfoPlist,
+  withAppDelegate,
+  createRunOncePlugin,
+} = require('@expo/config-plugins');
+
+const pkg = require('./package.json');
+
 const DEFAULT_DEPLOYMENT_TARGET = '16.0';
+
+const FABRIC_IMPORT = '#import <appdna_sdk_react_native/AppdnaFabricComponents.h>';
+
+const FABRIC_OVERRIDE = `
+// Added by @appdna-ai/react-native-sdk's config plugin. Required because this app links pods as
+// DYNAMIC frameworks (Firebase forces it): codegen's RCTThirdPartyFabricComponentsProvider is
+// wrapped in \`#ifndef RCT_DYNAMIC_FRAMEWORKS\`, so nothing registers AppdnaScreenSlotView and
+// <AppDNAScreenSlot> silently renders React's "Unimplemented component" placeholder.
+- (NSDictionary<NSString *, Class<RCTComponentViewProtocol>> *)thirdPartyFabricComponents
+{
+  NSMutableDictionary *components = [[super thirdPartyFabricComponents] mutableCopy];
+  [components addEntriesFromDictionary:AppdnaFabricComponents()];
+  return components;
+}
+`;
+
+const SWIFT_APPDELEGATE_ERROR =
+  '[@appdna-ai/react-native-sdk] This project has a SWIFT AppDelegate (Expo SDK 53+), and the\n' +
+  'AppDNA plugin cannot register the Fabric screen-slot component into it.\n' +
+  '\n' +
+  'Why it matters: the plugin links pods as dynamic frameworks (FirebaseFirestore requires it), and\n' +
+  "under dynamic frameworks React Native compiles its third-party component registry OUT. Without a\n" +
+  'registration, <AppDNAScreenSlot> renders "Unimplemented component: <AppdnaScreenSlotView>" —\n' +
+  'with no error and no warning. Everything else in the SDK works.\n' +
+  '\n' +
+  'Pick one:\n' +
+  '  1. Link statically — the codegen registry is then compiled IN and nothing else is needed:\n' +
+  '       ["@appdna-ai/react-native-sdk", { "useFrameworks": "static" }]\n' +
+  '     (Slower `pod install` on some pod graphs; see the Podfile notes in the SDK repo.)\n' +
+  '  2. Acknowledge that <AppDNAScreenSlot> will not render, and keep everything else:\n' +
+  '       ["@appdna-ai/react-native-sdk", { "screenSlot": "skip" }]\n' +
+  '\n' +
+  'https://docs.appdna.ai/sdks/react-native/installation';
+
+/** Replace-or-append a key in a `gradle.properties` mod result. */
+const setGradleProperty = (properties, key, value) => {
+  const existing = properties.find(
+    (item) => item.type === 'property' && item.key === key,
+  );
+  if (existing) {
+    existing.value = value;
+    return properties;
+  }
+  properties.push({ type: 'property', key, value });
+  return properties;
+};
 
 /** @type {(cfg: any, props?: any) => any} */
 const withAppDNA = (config, props = {}) => {
-  const {
-    withPodfileProperties,
-    withEntitlementsPlist,
-    withInfoPlist,
-    createRunOncePlugin,
-  } = require('@expo/config-plugins');
-
   const deploymentTarget = props.deploymentTarget ?? DEFAULT_DEPLOYMENT_TARGET;
   const enablePush = props.enablePush ?? false;
+  const useFrameworks = props.useFrameworks ?? 'dynamic';
+  const screenSlot = props.screenSlot ?? 'auto';
 
-  // (1) + (2): both land in Podfile.properties.json, which `expo prebuild` reads.
+  // Expo reads this when generating the native projects, so `expo config` and `expo-doctor` agree
+  // with the two property files written below rather than contradicting them.
+  config.newArchEnabled = true;
+
+  // (1) + (2) + New Arch on iOS. All three land in Podfile.properties.json, which `expo prebuild`
+  // reads. Expo's template Podfile derives `ENV['RCT_NEW_ARCH_ENABLED']` from `newArchEnabled`, so
+  // this — not a hand-set env var — is how the pod install gets it.
   config = withPodfileProperties(config, (cfg) => {
     cfg.modResults['ios.deploymentTarget'] = deploymentTarget;
     // `dynamic`, not `static`. AppDNASDK pulls FirebaseFirestore → gRPC → BoringSSL-GRPC, and
-    // `pod install` wedges inside that target under static frameworks — measured, not assumed. The
-    // example's Podfile uses the same linkage; the two must agree or the example builds a target no
-    // Expo consumer can reproduce.
-    cfg.modResults['ios.useFrameworks'] = 'dynamic';
+    // `pod install` wedges inside that target under static frameworks — measured, not assumed
+    // (example/ios/Podfile records all three attempts). The example's Podfile uses the same
+    // linkage; the two must agree or the example builds a target no Expo consumer can reproduce.
+    cfg.modResults['ios.useFrameworks'] = useFrameworks;
+    cfg.modResults.newArchEnabled = 'true';
     return cfg;
   });
 
+  // New Arch on Android. Expo SDK 52 defaults this to false; the TurboModule's event emitters only
+  // exist under the New Architecture, so without this every SDK callback is dead.
+  config = withGradleProperties(config, (cfg) => {
+    setGradleProperty(cfg.modResults, 'newArchEnabled', 'true');
+    return cfg;
+  });
+
+  // (3) The screen-slot registration dynamic frameworks compiles out. Static linkage does not need
+  // it — codegen's provider already covers that case, and adding the override there is merely
+  // redundant, so skip it and keep the AppDelegate untouched.
+  if (useFrameworks === 'dynamic' && screenSlot !== 'skip') {
+    config = withAppDelegate(config, (cfg) => {
+      cfg.modResults.contents = addFabricRegistration(
+        cfg.modResults.contents,
+        cfg.modResults.language,
+      );
+      return cfg;
+    });
+  }
+
   if (enablePush) {
-    // (3a) APNs environment. `expo prebuild` writes this into the .entitlements file.
+    // (4a) APNs environment. `expo prebuild` writes this into the .entitlements file.
     config = withEntitlementsPlist(config, (cfg) => {
       cfg.modResults['aps-environment'] =
         cfg.modResults['aps-environment'] ?? 'development';
       return cfg;
     });
 
-    // (3b) Background delivery of silent pushes.
+    // (4b) Background delivery of silent pushes.
     config = withInfoPlist(config, (cfg) => {
       const modes = new Set(cfg.modResults.UIBackgroundModes ?? []);
       modes.add('remote-notification');
@@ -73,11 +181,59 @@ const withAppDNA = (config, props = {}) => {
     return cfg;
   });
 
-  return createRunOncePlugin(
-    (c) => c,
-    '@appdna-ai/react-native-sdk',
-    require('./package.json').version,
-  )(config);
+  return config;
 };
 
-module.exports = withAppDNA;
+/**
+ * Insert the `thirdPartyFabricComponents` override into an AppDelegate.
+ *
+ * Idempotent: `expo prebuild` regenerates the AppDelegate and re-runs every mod, and a host may also
+ * list the plugin under two names. Re-adding the override would not compile.
+ *
+ * @param {string} contents
+ * @param {string} language — 'objc' | 'objcpp' | 'swift', as `withAppDelegate` reports it.
+ * @returns {string}
+ */
+const addFabricRegistration = (contents, language) => {
+  if (language === 'swift') {
+    throw new Error(SWIFT_APPDELEGATE_ERROR);
+  }
+  if (contents.includes('AppdnaFabricComponents')) {
+    return contents; // already registered — a re-run, not a second app
+  }
+
+  const importAnchor = contents.lastIndexOf('#import');
+  if (importAnchor === -1) {
+    throw new Error(
+      '[@appdna-ai/react-native-sdk] Could not find an #import in AppDelegate to anchor the ' +
+        'Fabric screen-slot registration. Add it by hand, or pass { "screenSlot": "skip" }: ' +
+        'https://docs.appdna.ai/sdks/react-native/installation',
+    );
+  }
+  const importLineEnd = contents.indexOf('\n', importAnchor);
+  const withImport =
+    contents.slice(0, importLineEnd + 1) +
+    FABRIC_IMPORT +
+    '\n' +
+    contents.slice(importLineEnd + 1);
+
+  const implMatch = /@implementation\s+AppDelegate\b.*\n/.exec(withImport);
+  if (!implMatch) {
+    throw new Error(
+      '[@appdna-ai/react-native-sdk] Could not find `@implementation AppDelegate` to anchor the ' +
+        'Fabric screen-slot registration. Add it by hand, or pass { "screenSlot": "skip" }: ' +
+        'https://docs.appdna.ai/sdks/react-native/installation',
+    );
+  }
+  const insertAt = implMatch.index + implMatch[0].length;
+  return withImport.slice(0, insertAt) + FABRIC_OVERRIDE + withImport.slice(insertAt);
+};
+
+// 🔴 This used to wrap the IDENTITY function `(c) => c` and run AFTER every mod had already been
+// applied — so the run-once guard guarded nothing, and a config listing the plugin twice applied
+// every mod twice. The guard has to wrap the PLUGIN.
+module.exports = createRunOncePlugin(withAppDNA, pkg.name, pkg.version);
+
+// Exported for the plugin's own test suite, which drives the real mods through fake Expo runners.
+module.exports.withAppDNA = withAppDNA;
+module.exports.addFabricRegistration = addFabricRegistration;

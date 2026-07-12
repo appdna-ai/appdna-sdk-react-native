@@ -16,6 +16,16 @@ export interface DeferredDeepLink {
 
 export interface PaywallContext {
   placement?: string;
+  /**
+   * 🔴 `experiment` and `variant` were MISSING from this type while BOTH natives parsed them
+   * (ios/AppdnaModuleImpl.swift:766-767, android/.../AppdnaModule.kt:847-848). TypeScript rejects an
+   * excess property, so a JS host could not pass them at all: the native side read fields the wrapper
+   * made it impossible to send. Dead surface, wrapper-side — which is the harder direction to notice,
+   * because nothing crashes and nothing logs. The paywall simply is not attributed to the experiment
+   * that served it.
+   */
+  experiment?: string;
+  variant?: string;
   customData?: Record<string, unknown>;
 }
 
