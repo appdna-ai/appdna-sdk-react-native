@@ -17,6 +17,25 @@ ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 prepare_react_native_project!
 
 target 'AppdnaExample' do
+  # SPEC-070-B AC-11 / AC-21 / AC-30b — install the podspec's `Tests` test_spec, so CI can RUN the
+  # iOS unit tests (`parseOptions`, the promo-code default) rather than merely compile them.
+  #
+  # This MUST come before `use_native_modules!`. Autolinking looks the pod up in the target's existing
+  # dependencies and SKIPS what the Podfile already declared — `native_modules.rb`:
+  #
+  #     # 1. Gives you the chance to define it beforehand
+  #     # 2. Ensures CocoaPods won't explode if it's included twice
+  #     next if existing_deps.find { |d| d.name.split('/').first == spec.name }
+  #
+  # So this is the supported way to pass an option autolinking cannot: declare it first and let
+  # autolinking stand down. Declared AFTER, it would be a duplicate and CocoaPods would object.
+  #
+  # `:testspecs` generates the `appdna-sdk-react-native-Tests` scheme (plus its app host, which the
+  # tests need for a real run loop). It changes nothing about the app target itself.
+  pod 'appdna-sdk-react-native',
+      :path => '../node_modules/@appdna-ai/react-native-sdk',
+      :testspecs => ['Tests']
+
   config = use_native_modules!
 
   # SPEC-070-B P1 on-branch override, mirroring the Flutter example's APPDNA_IOS_SDK_PATH: build

@@ -63,8 +63,22 @@ export interface AppDNAOptions {
   vetoTimeout?: number;
   /**
    * When true, analytics stay OFF until `setConsent(true)`, and no event — not even
-   * `sdk_initialized` — is emitted before that decision. Default false (analytics are opt-out).
-   * Read by both natives; likewise absent from this type until now.
+   * `sdk_initialized` — is emitted before that decision.
+   *
+   * ⚠️ **Defaults to `false`, and that default is an opt-OUT contract.** Leave it unset and
+   * `configure()` emits `sdk_initialized` (device, OS, locale, session context) **before the user
+   * has decided anything**. That is the intended, documented behavior — it is what every shipped
+   * version of this SDK has done, and changing the default would silently zero the analytics of
+   * every existing host on upgrade — but it is *your* decision to accept, not ours to make for you.
+   *
+   * **If you ship into the EU/UK, or anywhere you need a lawful basis before the first byte leaves
+   * the device, set `requireConsent: true`.** Nothing else in this SDK will hold the events back.
+   *
+   * ```ts
+   * await AppDNA.configure(KEY, 'production', { requireConsent: true });
+   * // …show your consent UI, then:
+   * await AppDNA.setConsent(userSaidYes); // persisted across cold starts
+   * ```
    */
   requireConsent?: boolean;
   /**

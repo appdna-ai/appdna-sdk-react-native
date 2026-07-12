@@ -22,15 +22,48 @@ class MainActivity : ReactActivity() {
    * is never committed, bundled, or written to disk — the example is force-pushed to a public mirror,
    * so a key stored here is a key published. Launch it with:
    *
-   *     adb shell am start -n com.appdnaexample/.MainActivity -e appdnaApiKey adn_test_…
+   *     adb shell am start -n com.appdnaexample/.MainActivity \
+   *       -e appdnaApiKey adn_test_… -e appdnaOnboardingId … -e appdnaPaywallId …
    *
-   * Mirrors the iOS AppDelegate, which reads the same name out of the launch arguments.
+   * Mirrors the iOS AppDelegate, which reads the same names out of the launch arguments.
+   *
+   * 🔴 It used to forward ONLY `apiKey` while the iOS host forwarded six props — so every content id
+   * arrived `undefined` on Android and the example fell back to the id `"default"`, which exists in no
+   * console. An Android device pass therefore could not present a real onboarding flow, paywall or
+   * survey, and nothing said so: `present("default")` just resolves false. The two hosts now carry the
+   * same set.
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       object : DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled) {
         override fun getLaunchOptions(): Bundle? {
-          val apiKey = intent?.getStringExtra("appdnaApiKey") ?: return null
-          return Bundle().apply { putString("apiKey", apiKey) }
+          val launchIntent = intent ?: return null
+          val props =
+              Bundle().apply {
+                for ((arg, prop) in LAUNCH_PROPS) {
+                  launchIntent.getStringExtra(arg)?.takeIf { it.isNotBlank() }?.let { putString(prop, it) }
+                }
+              }
+          return if (props.isEmpty) null else props
         }
       }
+
+  companion object {
+    /** Launch-argument name → JS initial-prop name. Kept identical to AppDelegate.mm's `launchKeys`. */
+    private val LAUNCH_PROPS =
+        listOf(
+            "appdnaApiKey" to "apiKey",
+            "appdnaOnboardingId" to "onboardingId",
+            "appdnaPaywallId" to "paywallId",
+            "appdnaPaywall2Id" to "paywall2Id",
+            "appdnaSurveyId" to "surveyId",
+            "appdnaMessageEvent" to "messageEvent",
+            "appdnaProductId" to "productId",
+            "appdnaScreenId" to "screenId",
+            "appdnaScreenFlowId" to "screenFlowId",
+            "appdnaSlotName" to "slotName",
+            "appdnaExperimentId" to "experimentId",
+            "appdnaExperimentVariantId" to "experimentVariantId",
+            "appdnaPlacement" to "placement",
+        )
+  }
 }

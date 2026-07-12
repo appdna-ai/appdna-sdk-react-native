@@ -27,6 +27,7 @@
     "!android/build",
     "!android/.gradle",
     "!ios/build",
+    "!ios/Tests",
     "!**/__tests__",
     "!**/*.test.ts",
     "!**/.*"

@@ -293,7 +293,18 @@ private class SlotViewTreeOwner :
     }
 
     fun destroy() {
-        lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        // `LifecycleRegistry` REFUSES an INITIALIZED → DESTROYED transition — it throws
+        // "State must be at least CREATED to move to DESTROYED". Today the production path always
+        // calls [start] first (it happens inside the ComposeView branch of the slot's `init`), so an
+        // unguarded transition survives by coincidence rather than by design: any path that builds the
+        // owner without starting it — the injected-content test seam does exactly that — crashes here,
+        // and it crashes inside `onDropViewInstance`, a ViewManager callback on the UI thread.
+        //
+        // `destroy()` has no business caring whether anyone started it. Found by AC-37's mount/dispose
+        // memory test, which drives the real `onDropView()` the ViewManager drives.
+        if (lifecycleRegistry.currentState != Lifecycle.State.INITIALIZED) {
+            lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        }
         store.clear()
     }
 }

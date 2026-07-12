@@ -39,6 +39,16 @@
     @"appdnaPaywall2Id" : @"paywall2Id",
     @"appdnaSurveyId" : @"surveyId",
     @"appdnaMessageEvent" : @"messageEvent",
+    // The rest of the surface the example now drives: billing, screens, the inline slot, experiments
+    // and paywall placements. Same reason as above — these name real console content, and this
+    // repository is public.
+    @"appdnaProductId" : @"productId",
+    @"appdnaScreenId" : @"screenId",
+    @"appdnaScreenFlowId" : @"screenFlowId",
+    @"appdnaSlotName" : @"slotName",
+    @"appdnaExperimentId" : @"experimentId",
+    @"appdnaExperimentVariantId" : @"experimentVariantId",
+    @"appdnaPlacement" : @"placement",
   };
   for (NSString *arg in launchKeys) {
     NSString *value = [[NSUserDefaults standardUserDefaults] stringForKey:arg];
