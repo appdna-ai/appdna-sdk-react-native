@@ -33,7 +33,7 @@ export class AppDNAPush {
 
   /** Listen for push tapped events. Returns unsubscribe function. */
   static onPushTapped(callback: (payload: PushPayload, actionId?: string) => void): () => void {
-    const subscription = addNativeListener<PushTappedPayload>('onPushTapped', (data) =>
+    const subscription = addNativeListener<PushTappedPayload>('onPushReceived', (data) =>
       callback(data.payload, data.actionId),
     );
     return () => subscription.remove();

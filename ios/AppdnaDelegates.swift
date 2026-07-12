@@ -168,8 +168,20 @@ final class PaywallForwarder: NSObject, AppDNAPaywallDelegate {
         ])
     }
 
-    func onPaywallPurchaseFailed(paywallId: String, error: Error) {
-        emit("onPaywallPurchaseFailed", ["paywallId": paywallId, "error": error.localizedDescription])
+    // 🔴 Override the WIDEST overload — see the Kotlin twin. Implementing only the 2-arg form still
+    // fires (the protocol default chains down to it) while silently dropping `errorType` + `productId`.
+    func onPaywallPurchaseFailed(
+        paywallId: String,
+        error: Error,
+        errorType: String,
+        productId: String?
+    ) {
+        emit("onPaywallPurchaseFailed", [
+            "paywallId": paywallId,
+            "error": error.localizedDescription,
+            "errorType": errorType,
+            "productId": productId as Any,
+        ])
     }
 
     func onPaywallDismissed(paywallId: String) {

@@ -346,7 +346,7 @@ export class AppDNA {
         addNativeListener<{ paywallId: string; action: string }>('onPaywallAction', (data) => delegate.onPaywallAction(data.paywallId, data.action)),
         addNativeListener<{ paywallId: string; productId: string }>('onPaywallPurchaseStarted', (data) => delegate.onPaywallPurchaseStarted(data.paywallId, data.productId)),
         addNativeListener<{ paywallId: string; productId: string; transaction: Record<string, unknown> }>('onPaywallPurchaseCompleted', (data) => delegate.onPaywallPurchaseCompleted(data.paywallId, data.productId, data.transaction)),
-        addNativeListener<{ paywallId: string; error: string }>('onPaywallPurchaseFailed', (data) => delegate.onPaywallPurchaseFailed(data.paywallId, data.error)),
+        addNativeListener<{ paywallId: string; error: string; errorType: string; productId: string | null }>('onPaywallPurchaseFailed', (data) => delegate.onPaywallPurchaseFailed(data.paywallId, data.error, data.errorType, data.productId)),
         addNativeListener<{ paywallId: string }>('onPaywallDismissed', (data) => delegate.onPaywallDismissed(data.paywallId)),
         addNativeListener<{ paywallId: string }>('onPaywallRestoreStarted', (data) => delegate.onPaywallRestoreStarted(data.paywallId)),
         addNativeListener<{ paywallId: string; restoredProductIds: string[] }>('onPaywallRestoreCompleted', (data) => delegate.onPaywallRestoreCompleted(data.paywallId, data.restoredProductIds)),

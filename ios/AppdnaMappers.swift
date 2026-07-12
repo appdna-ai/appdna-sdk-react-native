@@ -120,6 +120,17 @@ enum AppdnaMappers {
         case .track(let event, let properties): return compact(["type": "track", "event": event, "properties": properties])
         case .haptic(let type): return ["type": "haptic", "hapticType": type]
         case .custom(let type, let value): return compact(["type": "custom", "customType": type, "value": value])
+        // Flow-level verbs. Discriminators + field names are Android's `toActionMap`
+        // (`screens/SectionContext.kt:94-103`) verbatim — the wire must not fork per platform.
+        case .restart: return ["type": "restart"]
+        case .complete: return ["type": "complete"]
+        case .setResponse(let key, let value): return compact(["type": "setResponse", "key": key, "value": value])
+        case .presentPaywall(let id): return compact(["type": "presentPaywall", "id": id])
+        case .dismissPaywall: return ["type": "dismissPaywall"]
+        case .showMessage(let id): return compact(["type": "showMessage", "id": id])
+        case .setUserProperty(let key, let value): return compact(["type": "setUserProperty", "key": key, "value": value])
+        case .purchase(let productId): return ["type": "purchase", "productId": productId]
+        case .restore: return ["type": "restore"]
         }
     }
 

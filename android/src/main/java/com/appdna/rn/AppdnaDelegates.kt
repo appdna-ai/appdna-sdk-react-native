@@ -194,8 +194,26 @@ internal class PaywallForwarder(
         )
     }
 
-    override fun onPaywallPurchaseFailed(paywallId: String, error: Throwable) {
-        emitter.emit("onPaywallPurchaseFailed", mapOf("paywallId" to paywallId, "error" to errorMessage(error)))
+    // 🔴 Override the WIDEST overload. The SDK calls the 4-arg form; a wrapper that overrides only the
+    // 2-arg one still FIRES (the default chain funnels down to it) — but `errorType` and `productId` are
+    // erased on the way, so the JS host is handed an opaque error and cannot tell a user cancel from a
+    // declined card, nor which of two products failed. That is precisely the gap the discriminator was
+    // added to close, surviving one layer up.
+    override fun onPaywallPurchaseFailed(
+        paywallId: String,
+        error: Throwable,
+        errorType: String,
+        productId: String?,
+    ) {
+        emitter.emit(
+            "onPaywallPurchaseFailed",
+            mapOf(
+                "paywallId" to paywallId,
+                "error" to errorMessage(error),
+                "errorType" to errorType,
+                "productId" to productId,
+            ),
+        )
     }
 
     override fun onPaywallDismissed(paywallId: String) {

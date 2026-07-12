@@ -125,7 +125,6 @@ class AppdnaScreenSlotView internal constructor(
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
 
-        System.err.println("PROBE onLayout changed=$changed l=$left t=$top r=$right b=$bottom")
         val availableWidth = right - left
         // Not laid out yet: an UNSPECIFIED-width probe would measure content against infinity and
         // report a height for a line length that will never exist on screen.
@@ -135,6 +134,9 @@ class AppdnaScreenSlotView internal constructor(
             MeasureSpec.makeMeasureSpec(availableWidth, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
         )
+        // `View.measure` is backed by a spec-keyed measure cache, so this probe costs a real measure
+        // pass only when the content has actually invalidated itself (`requestLayout()` clears that
+        // cache) — i.e. exactly when its height may have changed. An unchanged content is a cache hit.
         val contentHeight = contentView.measuredHeight
 
         // Restore the child's measured state to the bounds `super.onLayout` actually laid it out to.

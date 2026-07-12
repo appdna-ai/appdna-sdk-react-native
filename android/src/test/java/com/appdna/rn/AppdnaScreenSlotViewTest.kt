@@ -39,15 +39,29 @@ class AppdnaScreenSlotViewTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
 
     /**
-     * Stands in for the ComposeView. Behaves exactly as any real content view does: under an EXACTLY
-     * height spec it takes the height it is given (this is what a MATCH_PARENT child of the Fabric
-     * host does, and what made the old implementation echo the host height); under UNSPECIFIED it
-     * reports its own intrinsic height.
+     * Stands in for the ComposeView. Behaves exactly as any real content view does:
+     *
+     *  - under an EXACTLY height spec it takes the height it is GIVEN — this is what a MATCH_PARENT
+     *    child of the Fabric host does, and it is what made the old implementation echo the host's
+     *    height straight back to JS;
+     *  - under UNSPECIFIED it reports its own INTRINSIC height;
+     *  - and changing that intrinsic height invalidates it. `View.measure` is backed by a measure
+     *    cache keyed on the spec pair, and `requestLayout()` is what clears it — so content that
+     *    resized without calling it would be measured from the stale cache. Every real view
+     *    (ComposeView included) requests layout when its content changes; a fake that did not would
+     *    be testing a situation Android cannot produce.
      */
     private class FakeContentView(
         context: Context,
-        var intrinsicHeightPx: Int,
+        intrinsicHeightPx: Int,
     ) : View(context) {
+        var intrinsicHeightPx: Int = intrinsicHeightPx
+            set(value) {
+                if (field == value) return
+                field = value
+                requestLayout()
+            }
+
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val width = MeasureSpec.getSize(widthMeasureSpec)
             val height = when (MeasureSpec.getMode(heightMeasureSpec)) {
