@@ -175,6 +175,27 @@ public final class AppdnaModuleImpl: NSObject {
         resolve(AppDNA.isConsentGranted())
     }
 
+    /// N5 (ADR-002) — ADOPT-ANDROID, iOS NO-OP. Deliberately, and it says so rather than pretending.
+    ///
+    /// iOS has no `ForcedTheme` (the Android core's own comment reads "Mirrors iOS
+    /// AppDNA.setForcedTheme (TBD)" — it was never built). Flutter's iOS plugin already answers these
+    /// two as no-ops for the same reason; RN now matches instead of omitting them entirely, which is
+    /// what let an Android host on Flutter force the theme while the same host on RN could not.
+    ///
+    /// It resolves rather than rejecting: a cross-platform host calls this on both platforms, and a
+    /// rejection would force every caller to branch on `Platform.OS` for a feature that simply is not
+    /// there yet. `getForcedTheme()` answers `null` — a true answer, not a fabricated one. When iOS
+    /// implements ForcedTheme, both wrappers light up at once: they are generated from the same IR.
+    @objc(setForcedTheme:resolve:reject:)
+    public func setForcedTheme(_ theme: NSString?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        resolve(nil)
+    }
+
+    @objc(getForcedTheme:reject:)
+    public func getForcedTheme(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        resolve(nil)
+    }
+
     @objc(setLogLevel:)
     public func setLogLevel(_ level: String) {
         let mapped: LogLevel

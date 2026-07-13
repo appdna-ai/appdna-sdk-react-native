@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-ios-adapter.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 4b9457572d2961caf11c76c3323445d4faff4d03
+// Last codegen commit: becec5bd534f3a891ae3ea7638d019d42a81b848
 
 #import <React/RCTAssert.h>
 #import <React/RCTBridgeModule.h>
@@ -165,6 +165,19 @@ RCT_EXPORT_MODULE()
 - (void)setLogLevel:(NSString *)level
 {
   [_impl setLogLevel:level];
+}
+
+- (void)setForcedTheme:(NSString *)theme
+            resolve:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl setForcedTheme:theme resolve:resolve reject:reject];
+}
+
+- (void)getForcedTheme:(RCTPromiseResolveBlock )resolve
+            reject:(RCTPromiseRejectBlock )reject
+{
+  [_impl getForcedTheme:resolve reject:reject];
 }
 
 - (void)shutdown:(RCTPromiseResolveBlock )resolve

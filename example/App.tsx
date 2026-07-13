@@ -180,7 +180,14 @@ export default function App({
       onPaywallAction: (id, action) => append(`paywall action: ${id} / ${action}`),
       onPaywallPurchaseCompleted: (id, product) => append(`paywall purchase: ${id} / ${product}`),
       onPaywallPurchaseFailed: (id, error) => append(`paywall purchase failed: ${id} / ${error}`),
-      onPaywallRestoreCompleted: (products) => append(`paywall restore: ${products.length} product(s)`),
+      // 🔴 This read the FIRST parameter and called it `products`. The signature is
+      // `(paywallId: string, restoredProductIds: string[])`, so `products` was the paywall ID and
+      // `.length` was its CHARACTER COUNT: restoring zero products logged "paywall restore: 24
+      // product(s)". TypeScript cannot catch it — `.length` is valid on a string — and the example is
+      // the code customers copy. Worse, it is the log an agentic or human device pass READS, so the
+      // pass would have recorded a successful restore of N products that never happened.
+      onPaywallRestoreCompleted: (paywallId, restoredProductIds) =>
+        append(`paywall restore (${paywallId}): ${restoredProductIds.length} product(s)`),
       onPaywallPurchaseStarted: (id, product) => append(`paywall purchase started: ${id} / ${product}`),
       onPaywallRestoreStarted: (id) => append(`paywall restore started: ${id}`),
       onPaywallRestoreFailed: (id, error) => append(`paywall restore failed: ${id} / ${String(error)}`),
@@ -374,6 +381,29 @@ export default function App({
               append(`inAppMessages.suppressDisplay(${next})`);
             }}
           />
+          {/*
+            N5 (ADR-002) — forced theme. ANDROID-ONLY: iOS has no ForcedTheme and answers as a
+            documented no-op, so on iOS this button will log `null` back. That asymmetry is the point
+            of showing it: a host should see what the API actually does on each platform rather than
+            discover the no-op in production. Reading the value back is what makes it a demonstration
+            and not a claim.
+          */}
+          <Button
+            label="Force dark theme (Android)"
+            onPress={async () => {
+              await AppDNA.setForcedTheme('dark');
+              const readBack = await AppDNA.getForcedTheme();
+              append(`setForcedTheme('dark') → getForcedTheme() = ${String(readBack)}`);
+            }}
+          />
+          <Button
+            label="Clear forced theme"
+            onPress={async () => {
+              await AppDNA.setForcedTheme(null);
+              const readBack = await AppDNA.getForcedTheme();
+              append(`setForcedTheme(null) → getForcedTheme() = ${String(readBack)}`);
+            }}
+          />
         </Section>
 
         <Section title="Screens">
@@ -383,11 +413,22 @@ export default function App({
           <Button
             label="Preview screen from JSON"
             onPress={() =>
+              // 🔴 This sent `blocks`. `ScreenConfig` has `sections` — there is no `blocks` key on
+              // either platform. Every ScreenConfig field is optional, so decoding SUCCEEDED,
+              // `previewScreen` returned TRUE, and then the presenter found `sections = []` and bailed
+              // silently. The log said `screens.preview() → true` and nothing appeared: the only
+              // executable proof of `previewScreen` was a false positive, and the example taught a
+              // payload shape that renders a blank screen.
               run('screens.preview()', () =>
                 AppDNA.screens.preview(
                   JSON.stringify({
                     id: 'rn_preview',
-                    blocks: [{ type: 'text', text: 'Previewed from JSON — no console round trip.' }],
+                    sections: [
+                      {
+                        type: 'text',
+                        data: { text: 'Previewed from JSON — no console round trip.' },
+                      },
+                    ],
                   }),
                 ),
               )

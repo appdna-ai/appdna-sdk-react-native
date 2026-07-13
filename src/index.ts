@@ -121,6 +121,26 @@ export class AppDNA {
     AppdnaModule.setLogLevel(level);
   }
 
+  /**
+   * Force `'light' | 'dark' | 'system'`, overriding the device preference. Pass `null` to clear.
+   *
+   * ⚠️ ANDROID ONLY. iOS has no forced-theme concept, so this resolves and does nothing there, and
+   * `getForcedTheme()` answers `null` — a true answer rather than a fabricated one. It does not reject:
+   * a cross-platform host calls this on both platforms, and forcing every caller to branch on
+   * `Platform.OS` for a feature that simply is not there yet would be worse than a no-op that says so.
+   *
+   * (N5 in ADR-002. Flutter already exposed this with the same iOS no-op; React Native exposed nothing
+   * at all, so an Android host on Flutter could force the theme and the same host here could not.)
+   */
+  static async setForcedTheme(theme: 'light' | 'dark' | 'system' | null): Promise<void> {
+    await AppdnaModule.setForcedTheme(theme ?? undefined);
+  }
+
+  /** The forced theme, or `null` when none is set. Always `null` on iOS — see {@link setForcedTheme}. */
+  static async getForcedTheme(): Promise<'light' | 'dark' | 'system' | null> {
+    return (await AppdnaModule.getForcedTheme()) as 'light' | 'dark' | 'system' | null;
+  }
+
   /** Identify a user. */
   static async identify(
     userId: string,

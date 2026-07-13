@@ -1,6 +1,7 @@
 package com.appdna.rn
 
 import ai.appdna.sdk.AppDNA
+import ai.appdna.sdk.ForcedTheme
 import ai.appdna.sdk.AppDNAOptions
 import ai.appdna.sdk.BillingProvider
 import ai.appdna.sdk.Environment
@@ -263,6 +264,34 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
 
     override fun setLogLevel(level: String) {
         AppDNA.setLogLevel(level)
+    }
+
+    /**
+     * N5 (ADR-002) — ADOPT-ANDROID, iOS no-op. Matches what Flutter already did.
+     *
+     * Android has ForcedTheme; iOS never implemented it. Flutter EXPOSED it anyway (with the iOS
+     * plugin answering nil, documented); React Native exposed NOTHING. So an Android host on Flutter
+     * could force the theme and the same host on RN could not — on a spec titled "full native parity".
+     * The two wrappers omitted DIFFERENTLY, and neither omission was written down, which is exactly
+     * how they could diverge unseen.
+     *
+     * An unrecognised value CLEARS the override rather than throwing: a bad theme string must not
+     * break a host, and "system" is the honest fallback.
+     */
+    override fun setForcedTheme(theme: String?, promise: Promise) {
+        AppDNA.setForcedTheme(
+            when (theme?.lowercase()) {
+                "light" -> ForcedTheme.LIGHT
+                "dark" -> ForcedTheme.DARK
+                "system" -> ForcedTheme.SYSTEM
+                else -> null
+            },
+        )
+        promise.resolve(null)
+    }
+
+    override fun getForcedTheme(promise: Promise) {
+        promise.resolve(AppDNA.getForcedTheme()?.name?.lowercase())
     }
 
     override fun shutdown(promise: Promise) {

@@ -2,7 +2,7 @@
 // Source: src/lib/sdk-delegates/sdk-methods.ts
 // Generator: scripts/sdk-codegen/emit-turbomodule-spec.ts
 // Regenerate: pnpm sdk-codegen
-// Last codegen commit: 4b9457572d2961caf11c76c3323445d4faff4d03
+// Last codegen commit: becec5bd534f3a891ae3ea7638d019d42a81b848
 
 import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
@@ -46,6 +46,15 @@ export interface Spec extends TurboModule {
 
   /** Set log verbosity: none|error|warning|info|debug. */
   setLogLevel(level: string): void;
+
+  /**
+   * Force light|dark|system, overriding the system preference. Pass null to clear. ANDROID-ONLY:
+   * iOS has no ForcedTheme, and answers as a no-op rather than pretending (N5).
+   */
+  setForcedTheme(theme?: string): Promise<void>;
+
+  /** The forced theme (light|dark|system), or null when none is set. Always null on iOS (N5). */
+  getForcedTheme(): Promise<string>;
 
   /** Flush and tear down. The SDK must be re-configured before further use. */
   shutdown(): Promise<void>;
@@ -102,15 +111,14 @@ export interface Spec extends TurboModule {
   presentOnboarding(flowId: string): Promise<boolean>;
 
   /**
-   * Present a paywall by id. Resolves **false** when nothing was presented: unknown paywall id, SDK
-   * not configured, runtime-locked, or no view controller / Activity. It used to resolve success in
-   * all four cases — `present('typo_id')` reported OK and showed nothing.
+   * Present a paywall by id. False when the id does not exist, the SDK is unconfigured, or it is
+   * runtime-locked.
    */
   presentPaywall(paywallId: string, context?: Object): Promise<boolean>;
 
   /**
    * Present the paywall configured for a placement (N17: an iOS overload, a distinct Android
-   * name). Resolves false when no paywall matched — see `presentPaywall`.
+   * name).
    */
   presentPaywallByPlacement(placement: string, context?: Object): Promise<boolean>;
 
