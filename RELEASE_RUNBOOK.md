@@ -1,8 +1,8 @@
 # React Native SDK — release runbook
 
-## AC-32 ruling: deprecate every published version below 1.0.8
+## AC-32 ruling: deprecate every published version below 1.0.7
 
-**Ruling: YES. `npm deprecate '@appdna-ai/react-native-sdk@<1.0.8'` must run as part of this
+**Ruling: YES. `npm deprecate '@appdna-ai/react-native-sdk@<1.0.7'` must run as part of this
 release.** This is not housekeeping — it is a correctness fix.
 
 ### Why
@@ -23,7 +23,7 @@ work**:
 
 A user who follows an old blog post and installs the default version gets a package that cannot
 build, and if they work around that, an SDK whose callbacks are silently dead. Leaving those
-versions undeprecated means npm keeps recommending them by default until 1.0.8 becomes `latest` —
+versions undeprecated means npm keeps recommending them by default until 1.0.7 becomes `latest` —
 and keeps serving them forever to anyone who pins.
 
 `npm deprecate` does **not** unpublish: the tarballs stay installable (so no lockfile breaks), the
@@ -31,16 +31,16 @@ user just gets a loud warning telling them what to do. That is exactly the right
 
 ### The commands
 
-Run **after** 1.0.8 has published successfully and is `latest` — deprecating before the replacement
+Run **after** 1.0.7 has published successfully and is `latest` — deprecating before the replacement
 exists would point people at a version they cannot install.
 
 ```bash
-# 1. Verify 1.0.8 is up and is `latest`.
-npm view @appdna-ai/react-native-sdk version        # -> 1.0.8
+# 1. Verify 1.0.7 is up and is `latest`.
+npm view @appdna-ai/react-native-sdk version        # -> 1.0.7
 
-# 2. Deprecate everything below it. `<1.0.8` is a semver range; npm applies it to each match.
-npm deprecate '@appdna-ai/react-native-sdk@<1.0.8' \
-  'Non-functional: these versions shipped without a podspec or android/build.gradle (the native module never linked), and their event listeners never fired. Upgrade to >=1.0.8, which requires the React Native New Architecture.'
+# 2. Deprecate everything below it. `<1.0.7` is a semver range; npm applies it to each match.
+npm deprecate '@appdna-ai/react-native-sdk@<1.0.7' \
+  'Non-functional: these versions shipped without a podspec or android/build.gradle (the native module never linked), and their event listeners never fired. Upgrade to >=1.0.7, which requires the React Native New Architecture.'
 
 # 3. Confirm.
 npm view @appdna-ai/react-native-sdk@1.0.6 deprecated
@@ -68,7 +68,7 @@ and Gradle will resolve nothing.
 1. **iOS** `AppDNASDK` 1.0.70 → CocoaPods trunk.
 2. **Android** `ai.appdna:sdk-android` 1.0.42 → Maven Central.
 3. **Flutter** `appdna_sdk` → pub.dev.
-4. **React Native** `@appdna-ai/react-native-sdk` 1.0.8 → npm.
+4. **React Native** `@appdna-ai/react-native-sdk` 1.0.7 → npm.
 5. **Then** the `npm deprecate` above.
 
 `pnpm check:native-pins` asserts each wrapper pins the version actually being shipped, and

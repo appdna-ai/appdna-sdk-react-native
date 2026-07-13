@@ -28,7 +28,7 @@ AppDNA gives you a single drop-in SDK for the growth surfaces every subscription
 - Android API 24+ (when targeting Android)
 
 > **Versions 1.0.6 and earlier shipped no podspec and no Android Gradle module** and could not be
-> linked into an app at all. Install `1.0.8` or later.
+> linked into an app at all. Install `1.0.7` or later.
 
 ## Installation
 

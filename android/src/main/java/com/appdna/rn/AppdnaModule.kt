@@ -897,7 +897,20 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
      * argument #1 and TS declares the context's own `placement` optional. Silent. See the iOS twin.
      */
     private fun parsePaywallContext(map: ReadableMap?, fallbackPlacement: String): PaywallContext? {
-        val values = AppdnaBridge.toValueMap(map) ?: return null
+        val values = AppdnaBridge.toValueMap(map)
+        // 🔴 AND IT STILL DROPPED THE PLACEMENT FOR THE COMMONEST CALL OF ALL.
+        //
+        // The fix above covered "a context with no placement". It did not cover NO CONTEXT — and
+        // `presentByPlacement('upgrade')` is exactly that: the context argument is optional in TS, so
+        // a host that has nothing else to say simply omits it. `null` in, `null` out, and native's
+        // `paywall_view` then records `placement = context?.placement ?: "unknown"`
+        // (PaywallManager.kt:206). Every by-placement paywall view from an RN host landed in BigQuery
+        // as `unknown` — the one dimension the event exists to carry, thrown away one line after the
+        // wrapper was handed it. Found by SharedFixtureBridgeTest driving the REAL native path;
+        // invisible to a jest test, which sees only that the argument was forwarded.
+        if (values == null) {
+            return if (fallbackPlacement.isEmpty()) null else PaywallContext(placement = fallbackPlacement)
+        }
         val placement = values["placement"] as? String ?: fallbackPlacement
         @Suppress("UNCHECKED_CAST")
         val custom = values["customData"] as? Map<String, Any>

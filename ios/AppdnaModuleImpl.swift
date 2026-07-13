@@ -818,7 +818,16 @@ public final class AppdnaModuleImpl: NSObject {
     /// `fallbackPlacement` is what the caller already knows: the placement argument for
     /// `presentByPlacement`, and "" for `presentPaywall(id:)`, which has no placement by definition.
     private func parsePaywallContext(_ dict: [String: Any]?, fallbackPlacement: String) -> PaywallContext? {
-        guard let dict else { return nil }
+        // 🔴 AND IT STILL DROPPED THE PLACEMENT FOR THE COMMONEST CALL OF ALL. The fix above covered
+        // "a context with no placement"; it did not cover NO CONTEXT — and `presentByPlacement(
+        // 'upgrade')` is exactly that, the argument being optional in TS. `nil` in, `nil` out, and
+        // native's `paywall_view` then records `placement = context?.placement ?? "unknown"`. Every
+        // by-placement paywall view from an RN host landed in BigQuery as `unknown`. The Android twin
+        // was identical, and is where SharedFixtureBridgeTest caught it by driving the real native
+        // path; this is the same fix, and it is UNVERIFIED here (no Swift toolchain in the Codespace).
+        guard let dict else {
+            return fallbackPlacement.isEmpty ? nil : PaywallContext(placement: fallbackPlacement)
+        }
         return PaywallContext(
             placement: (dict["placement"] as? String) ?? fallbackPlacement,
             experiment: dict["experiment"] as? String,

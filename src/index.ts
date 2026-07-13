@@ -687,7 +687,12 @@ export class AppDNA {
 
   /**
    * Shut down the SDK and release resources.
-   * On Android this delegates to AppDNA.shutdown(); on iOS this is a no-op.
+   *
+   * Delegates to the native `AppDNA.shutdown()` on BOTH platforms: each one flushes the queued
+   * events before tearing its managers down. (This doc comment used to say the iOS call was a
+   * no-op. It was true of an earlier wrapper, it was fixed, and the sentence was not — so the
+   * shipped `.d.ts` told every RN developer their events were dropped on iOS shutdown. The claim is
+   * now checked by `check:rn-docs-api`, which reads the Swift body before believing prose about it.)
    */
   static async shutdown(): Promise<void> {
     // W16 — drop the config snapshot and its refresh subscription so a shutdown→configure cycle does

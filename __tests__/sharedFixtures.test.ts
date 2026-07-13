@@ -4,28 +4,38 @@
  * Cross-platform behavioral fixture runner for React Native — SPEC-070-0
  * §3.2 + §3.3 step 7.
  *
- * Per ADR-001 the React Native TS layer is a THIN WRAPPER. This runner
- * verifies the **bridge contract**: for each fixture's `action`, calling
- * the SDK TS facade triggers the expected `NativeModules.AppdnaModule.<x>`
- * invocation with the correct args. The actual events / delegate_calls /
- * state_after assertions are validated by iOS + Android runners (which
- * exercise real native SDK code paths).
+ * Per ADR-001 the React Native TS layer is a THIN WRAPPER. This runner is
+ * leg ONE of two, and it verifies the **bridge contract**: for each
+ * fixture's `action`, calling the SDK TS facade triggers the expected
+ * `AppdnaModule.<x>` invocation with the correct args.
  *
- * PHASE 0.4 SCAFFOLDING NOTE
- * ---------------------------
- * The TS facade today exposes a narrow surface (configure, identify,
- * track, presentPaywall, presentOnboarding, ...). Phase 0.4 wires the
- * action kinds for which the facade exists today; the rest emit a soft
- * skip with reason "Phase 0.5+ assertion not yet implemented." CI stays
- * green; the skip count is the Phase 0.5 remaining-work gauge.
+ * IT CANNOT ASSERT `expect`, AND THAT IS STRUCTURAL — NOT A GAP
+ * -------------------------------------------------------------
+ * A fixture's `expect` block asserts NATIVE behaviour: an audience rule
+ * evaluated, a DTO parsed, an envelope built, a step advanced. Here the
+ * native module is MOCKED AWAY, so the wrapper has none of that to do —
+ * ADR-001 forbids it from having any. The only honest assertion left on
+ * this side of the boundary is the call itself. Making jest "assert
+ * `expect`" would mean re-implementing the SDK inside the test and
+ * asserting the mirror, which is exactly the fiction this branch exists
+ * to kill.
  *
- *   - track_event   → AppDNA.track(...)         — bridge: AppdnaModule.track
- *   - identify      → AppDNA.identify(...)      — bridge: AppdnaModule.identify
- *   - tap_button    → SKIP (no host-driven UI tap simulation in the TS
- *                          facade today; v1.0.60 dual-emit is purely
- *                          native-side. Asserted by iOS + Android.)
- *   - submit_form        → SKIP (onboarding render is native)
- *   - evaluate_audience  → SKIP (native-only API surface)
+ * LEG TWO — `android/src/test/.../SharedFixtureBridgeTest.kt` — is what
+ * discharges AC-24: it drives the SAME fixtures through the SAME bridged
+ * `AppdnaModule` methods into a REAL, configured native `AppDNA`
+ * singleton under Robolectric, and asserts the fixture's `expect` block
+ * against the events native actually persisted, the payloads the wrapper
+ * actually pushed across the bridge, and the state native actually holds.
+ *
+ * Which fixtures may claim `rn` — and the recorded reason for every one
+ * that may not — lives in `scripts/check-fixture-coverage.ts`
+ * (`RN_NATIVE_ONLY`). A wrapper's bridged surface IS the host's API
+ * surface, so a fixture whose action is a UI tap, a raw push payload, or
+ * a bare audience-rule evaluation has no host entry point on ANY platform.
+ *
+ *   - track_event   → AppDNA.track(...)                    — AppdnaModule.track
+ *   - identify      → AppDNA.identify(...)                 — AppdnaModule.identify
+ *   - show_paywall  → AppDNA.paywall.presentByPlacement()  — AppdnaModule.presentPaywallByPlacement
  *
  * FIXTURE PATH RESOLUTION
  * -----------------------
@@ -201,6 +211,20 @@ async function runFixture(fixture: Fixture): Promise<void> {
       await AppDNA.identify(userId, traits);
       return;
     }
+    case 'show_paywall': {
+      // Only the PLACEMENT form has a host API. A `trigger_node_id` paywall is fired from inside a
+      // native onboarding flow graph; no SDK on any platform exposes that to a host, so a fixture
+      // that names one must not claim `rn`.
+      const placement = fixture.action.placement as string | undefined;
+      if (!placement) {
+        throw new Error(
+          `[${fixture.id}] show_paywall without a 'placement' — there is no host API for an ` +
+            `onboarding paywall-trigger node. Remove "rn" from this fixture's platforms.`,
+        );
+      }
+      await AppDNA.paywall.presentByPlacement(placement);
+      return;
+    }
     default:
       // 🔴 There used to be a soft-skip here: `{skipped: true, reason: 'not yet implemented'}`, and the
       // harness `console.warn`ed it and RETURNED — inside the `it()`. Jest printed a tick. 35 of the 37
@@ -236,6 +260,14 @@ function assertBridgeContract(fixture: Fixture): void {
       expect(c.method).toBe('identify');
       expect(c.args[0]).toBe(fixture.action.userId);
       expect(c.args[1]).toEqual(fixture.action.traits ?? null);
+      break;
+    }
+    case 'show_paywall': {
+      expect(mockCapturedCalls).toHaveLength(1);
+      const c = mockCapturedCalls[0]!;
+      expect(c.method).toBe('presentPaywallByPlacement');
+      expect(c.args[0]).toBe(fixture.action.placement);
+      expect(c.args[1]).toBeUndefined();
       break;
     }
     default:
