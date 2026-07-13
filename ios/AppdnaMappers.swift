@@ -148,26 +148,59 @@ enum AppdnaMappers {
      * its own result. The SDKs disagree about the type; the WIRE must not.
      */
     static func map(_ result: ScreenResult) -> [String: Any] {
-        compact([
+        var out: [String: Any] = [
             "screen_id": result.screenId,
             "dismissed": result.dismissed,
             "responses": result.responses,
-            "last_action": result.lastAction,
+            // Android's `ScreenManager.fireOnScreenDismissed` puts `last_action` into the map
+            // UNCONDITIONALLY, `null` included, so the key is always present there. Compacting it away
+            // here made the same dismissal read `undefined` on iOS and `null` on Android — and
+            // `if (result.last_action === null)` is the check a host actually writes.
+            "last_action": result.lastAction ?? NSNull(),
             "duration_ms": result.duration_ms,
-            "error": result.error.map { String(describing: $0) },
-        ])
+        ]
+        // `error`, by contrast, Android OMITS when there is none (`result.error?.let { … }`). So this
+        // one stays omitted: the rule is "match the other platform", not "be uniform with ourselves".
+        if let error = result.error { out["error"] = wireName(error) }
+        return out
     }
 
     static func map(_ result: FlowResult) -> [String: Any] {
-        compact([
+        var out: [String: Any] = [
             "flow_id": result.flowId,
             "completed": result.completed,
             "last_screen_id": result.lastScreenId,
             "responses": result.responses,
             "screens_viewed": result.screensViewed,
             "duration_ms": result.duration_ms,
-            "error": result.error.map { String(describing: $0) },
-        ])
+        ]
+        if let error = result.error { out["error"] = wireName(error) }
+        return out
+    }
+
+    /**
+     * 🔴 `ScreenError` → the wire string, and it is ANDROID'S enum name, not Swift's case name.
+     *
+     * This used to be `String(describing:)`, which yields `"screenNotFound"`. Android sends
+     * `it.name` — `"SCREEN_NOT_FOUND"`. Same failure, same key, two VALUES, in the mapper whose own
+     * comment says "the SDKs disagree about the type; the WIRE must not". A host comparing
+     * `result.error === 'SCREEN_NOT_FOUND'` was right on one platform and wrong on the other, and
+     * nothing failed loudly enough to say so.
+     *
+     * Android's spelling wins because Android's spelling is what already reaches JS: its core hands
+     * the delegate an already-encoded map, so changing it would move a wire the SDK does not own here.
+     * This switch is EXHAUSTIVE on purpose — a new `ScreenError` case fails to compile until someone
+     * names it, rather than silently reaching JS in the wrong dialect.
+     */
+    private static func wireName(_ error: ScreenError) -> String {
+        switch error {
+        case .configFetchFailed: return "CONFIG_FETCH_FAILED"
+        case .configFetchTimeout: return "CONFIG_FETCH_TIMEOUT"
+        case .screenNotFound: return "SCREEN_NOT_FOUND"
+        case .configParseError: return "CONFIG_PARSE_ERROR"
+        case .configInvalid: return "CONFIG_INVALID"
+        case .nestingDepthExceeded: return "NESTING_DEPTH_EXCEEDED"
+        }
     }
 
     /// P8 — the onboarding location field's structured answer. Keys match Android's exactly (both

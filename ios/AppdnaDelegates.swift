@@ -478,7 +478,20 @@ enum AppdnaVetoDecoder {
     }
 
     /// map-or-null → `StepConfigOverride?`, field by field.
+    ///
+    /// 🔴 THE SENTINEL IS NOT AN OVERRIDE.
+    ///
+    /// `{"__appdna_unhandled":true}` IS a map, so `reply as? [String: Any]` succeeded and this returned
+    /// a NON-NIL override with every field nil — for every step, on every RN host that does not
+    /// implement `onBeforeStepRender`, which is the default. iOS then merged that empty override into
+    /// each StepConfig, and the merger rebuilt the struct field-by-field and quietly forgot
+    /// `chat_config`, so the authored chat background vanished on every interactive_chat step.
+    ///
+    /// The merger is non-destructive now, so the damage is undone. But "no handler registered" is not
+    /// an instruction to override anything, and it must not decode as one — the next field somebody
+    /// forgets would be the next RN-only defect.
     static func stepConfigOverride(_ reply: Any?) -> StepConfigOverride? {
+        if isUnhandled(reply) { return nil }
         guard let map = reply as? [String: Any] else { return nil }
         return StepConfigOverride(
             fieldDefaults: map["fieldDefaults"] as? [String: Any],

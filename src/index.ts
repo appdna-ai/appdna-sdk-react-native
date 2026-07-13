@@ -19,7 +19,7 @@ import type {
   AppDNALogLevel,
   AppDNABillingProvider,
 } from './types';
-import { AppDNABilling, resetEntitlementObserver } from './billing';
+import { AppDNABilling, resetEntitlementObserver, resumeEntitlementObserver } from './billing';
 import type { Entitlement, TransactionInfo, ProductInfo } from './billing';
 import type {
   AppDNAOnboardingDelegate,
@@ -47,7 +47,7 @@ export type {
 export { AppDNABilling } from './billing';
 // `PurchaseResult` is gone, not renamed: it described a `{status, entitlement}` union no native has
 // ever resolved. What `purchase()` actually resolves is a `TransactionInfo`; everything else rejects.
-export type { Entitlement, TransactionInfo, ProductInfo } from './billing';
+export type { Entitlement, TransactionInfo, ProductInfo, AppDNAPurchaseErrorCode } from './billing';
 export { AppDNAPush } from './push';
 export { AppDNAScreenSlot } from './AppDNAScreenSlot';
 export type { AppDNAScreenSlotProps } from './AppDNAScreenSlot';
@@ -107,7 +107,13 @@ export class AppDNA {
     // and native would sit out the full veto timeout (5 s by default) before applying its default:
     // a five-second freeze before every onboarding step, every deep link, every in-app message.
     installHostCallbackDispatcher();
-    return AppdnaModule.configure(apiKey, env, options);
+    await AppdnaModule.configure(apiKey, env, options);
+    // 🔴 Native `shutdown()` drops every entitlement handler it holds. A JS listener registered once
+    // at startup — the normal integration — survives that, so after `shutdown() → configure()` it was
+    // still subscribed to an emitter nobody was feeding: `onEntitlementsChanged` never fired again for
+    // the rest of the process. `resetEntitlementObserver()` only re-opened the latch for the NEXT
+    // subscriber, and in the normal integration there is no next subscriber.
+    resumeEntitlementObserver();
   }
 
   /** Set log verbosity level at runtime. Valid: 'none','error','warning','info','debug'. */
@@ -150,11 +156,16 @@ export class AppDNA {
     return AppdnaModule.flush();
   }
 
-  /** Present a paywall. */
+  /**
+   * Present a paywall.
+   *
+   * Resolves `false` when nothing was presented — see {@link AppDNA.paywall.present}, whose contract
+   * this shares.
+   */
   static async presentPaywall(
     id: string,
     context?: PaywallContext
-  ): Promise<void> {
+  ): Promise<boolean> {
     return AppdnaModule.presentPaywall(id, context);
   }
 
@@ -348,7 +359,18 @@ export class AppDNA {
 
   /** Paywall module. */
   static paywall = {
-    present: (paywallId: string, context?: PaywallContext): Promise<void> =>
+    /**
+     * Present a paywall by id.
+     *
+     * **Resolves `false` when nothing was shown** — a paywall id that is not in the published config,
+     * an SDK that was never configured, a runtime-locked SDK (suspended tenant), or no host
+     * view/Activity to present from. It used to resolve SUCCESSFULLY in every one of those cases:
+     * `await AppDNA.paywall.present('typo_id')` reported success and no paywall appeared, forever.
+     *
+     * `true` means the paywall was handed to the platform for presentation; the lifecycle after that
+     * is the delegate's (`onPaywallPresented` / `onPaywallDismissed`).
+     */
+    present: (paywallId: string, context?: PaywallContext): Promise<boolean> =>
       AppdnaModule.presentPaywall(paywallId, context),
     /** Set a delegate to receive paywall lifecycle callbacks. */
     setDelegate: (delegate: AppDNAPaywallDelegate): void => {
@@ -374,8 +396,13 @@ export class AppDNA {
           delegate.onPromoCodeSubmit!(a.paywallId as string, a.code as string));
       }
     },
-    /** Present the paywall configured for a placement. */
-    presentByPlacement: (placement: string, context?: PaywallContext): Promise<void> =>
+    /**
+     * Present the paywall configured for a placement — the best audience match wins.
+     *
+     * Resolves `false` when no paywall matched the placement, or for any of the reasons
+     * {@link AppDNA.paywall.present} lists. Same contract, same silence it replaces.
+     */
+    presentByPlacement: (placement: string, context?: PaywallContext): Promise<boolean> =>
       AppdnaModule.presentPaywallByPlacement(placement, context),
   };
 

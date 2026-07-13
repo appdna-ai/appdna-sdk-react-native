@@ -9,14 +9,44 @@ import type { AppDNABillingDelegate } from './generated/delegates';
  * N11 — the wire shape is the **union** of the iOS and Android entitlement models, with the keys the
  * running platform has no concept of **omitted, never faked**. `isActive` is synthesised on Android
  * from `status`; dates cross as ISO-8601 strings.
+ *
+ * 🔴 This type used to declare `{productId, store, status, expiresAt, isTrial, offerType}` — all
+ * REQUIRED — and it matched NEITHER mapper:
+ *
+ *   - iOS `AppdnaMappers.map(_ entitlement:)` emits `{identifier, productId, isActive, expiresAt?}`.
+ *   - Android `AppdnaMappers.map(entitlement)` emits that plus `store`, `status`, `isTrial`,
+ *     `offerType?`.
+ *
+ * `identifier` and `isActive` — the two keys BOTH platforms send, and the only ones a host can act on
+ * cross-platform — were not on the type at all, so a host could not read them without a cast. And
+ * `store` / `status` / `isTrial` / `offerType` were typed non-optional while being **absent** on iOS:
+ * `if (e.status === 'active')` compiled and was ALWAYS FALSE there, and `e.expiresAt === null` never
+ * fired on either platform, because a missing expiry is an OMITTED key (`undefined`), never `null`.
+ *
+ * The two mappers are not made to agree by faking: iOS's core `Entitlement` genuinely has no store /
+ * status / trial / offer concept, and inventing `isTrial: false` for a user who IS in a trial is a
+ * worse answer than "this platform does not know". So the TYPE now says what the wire says.
+ *
+ * **Ask `isActive`.** It is the cross-platform question, present on both, synthesised on Android from
+ * the Play status vocabulary so a host never has to learn it.
  */
 export type Entitlement = {
+  /** Both platforms. Android aliases it to `productId` — it has no separate identifier. */
+  identifier: string;
+  /** Both platforms. */
   productId: string;
-  store: string;
-  status: string;
-  expiresAt: string | null;
-  isTrial: boolean;
-  offerType: string | null;
+  /** Both platforms. Android synthesises it from `status`; iOS reports StoreKit's own flag. */
+  isActive: boolean;
+  /** ISO-8601. **Omitted when there is no expiry** — check `=== undefined`, never `=== null`. */
+  expiresAt?: string;
+  /** **Android only** — iOS's `Entitlement` carries no store field. */
+  store?: string;
+  /** **Android only** — the raw Play status (`active` | `trialing` | `grace_period` | …). */
+  status?: string;
+  /** **Android only.** */
+  isTrial?: boolean;
+  /** **Android only**, and omitted there too when the entitlement carries no offer. */
+  offerType?: string;
 };
 
 /**
@@ -85,6 +115,16 @@ type EntitlementsChangedPayload = { entitlements: Entitlement[] };
  */
 let entitlementObserverStarted = false;
 
+/**
+ * How many `onEntitlementsChanged` subscriptions are STILL LIVE.
+ *
+ * Not a debug counter — it is the whole fix for the shutdown hole below. Native `shutdown()` drops
+ * every entitlement handler it holds (iOS `AppDNA.shutdown()`, Android's nulled billing manager), but
+ * a JS subscriber's closure is untouched by that: it is still in the emitter, still expecting events,
+ * and there is nobody left on the native side to send any.
+ */
+let liveEntitlementSubscribers = 0;
+
 function ensureEntitlementObserver(): void {
   if (entitlementObserverStarted) return;
   entitlementObserverStarted = true;
@@ -93,11 +133,10 @@ function ensureEntitlementObserver(): void {
   void AppdnaBillingModule.startEntitlementObserver();
 }
 
-/** Test seam: forget that the observer was started, so a suite can assert the first-listener call. */
 /**
  * Forget that the observer was started. Called by `shutdown()`.
  *
- * The latch below is what stops a re-subscribe storm — but it also meant that after
+ * The latch is what stops a re-subscribe storm — but it also meant that after
  * `shutdown()` → `configure()`, `startEntitlementObserver()` was never re-sent to native and
  * `onEntitlementsChanged` stayed dead for the rest of the process. The JS mirror of the Android
  * native defect where the same subscription was dropped.
@@ -106,8 +145,27 @@ export function resetEntitlementObserver(): void {
   entitlementObserverStarted = false;
 }
 
+/**
+ * 🔴 Re-arm native for the subscribers that never went away. Called by `configure()`.
+ *
+ * `resetEntitlementObserver()` only clears the latch — it re-opens the door for the NEXT subscriber
+ * to start the observer. The normal integration has no next subscriber: a host subscribes ONCE at
+ * startup and keeps that subscription for the life of the process. So across
+ * `configure → shutdown → configure`, native had dropped its handlers, JS still held a live listener,
+ * nothing re-sent `startEntitlementObserver()`, and `onEntitlementsChanged` never fired again — no
+ * error, no log, just a renewal that silently stops unlocking the app.
+ *
+ * Idempotent: `ensureEntitlementObserver()` latches, and both natives' `startEntitlementObserver` is
+ * remove-then-add, so a spurious call cannot stack a second handler.
+ */
+export function resumeEntitlementObserver(): void {
+  if (liveEntitlementSubscribers > 0) ensureEntitlementObserver();
+}
+
+/** Test seam: forget the latch AND the live subscribers, so a suite starts from a clean process. */
 export function __resetEntitlementObserverForTesting(): void {
   entitlementObserverStarted = false;
+  liveEntitlementSubscribers = 0;
 }
 
 /**
@@ -116,14 +174,40 @@ export function __resetEntitlementObserverForTesting(): void {
  * Provides purchase, restore, product info, and entitlement streaming
  * via native modules that delegate to iOS/Android SDKs.
  */
+/**
+ * The `code` on a `purchase()` rejection. **Identical on both platforms**, because it IS the SDK's own
+ * `billingErrorType(_:)` discriminator verbatim — the same string the paywall delegate already gets as
+ * `onPaywallPurchaseFailed(errorType:)` and the same one the `purchase_failed` event carries into the
+ * warehouse. There is no translation table between native and JS, so there is nothing that can fork.
+ *
+ * 🔴 Every one of these used to arrive as `PURCHASE_ERROR` with a LOCALIZED message. A host that
+ * wanted to do the one thing every store app does — say nothing when the user taps Cancel, show a
+ * retry when the card is declined — had to string-match `err.message`, in whatever language the
+ * device happened to be set to.
+ */
+export type AppDNAPurchaseErrorCode =
+  /** The user dismissed the store sheet. Almost always: show nothing. */
+  | 'userCancelled'
+  /** Deferred / ask-to-buy. The purchase is NOT complete; entitlements arrive later, if approved. */
+  | 'pending'
+  /** The product id is not in the store catalog (typo, or not yet approved). A config bug. */
+  | 'productNotFound'
+  /** Receipt verification failed server-side — signature, state, or a refund. Do not grant. */
+  | 'verificationFailed'
+  | 'networkError'
+  | 'serverError'
+  /** The selected provider (RevenueCat / Adapty) was not on the classpath / in the binary. */
+  | 'providerNotAvailable'
+  | 'unknown';
+
 export class AppDNABilling {
   /**
    * Purchase a product by its store product ID.
    * On Android, pass offerToken for subscription offers (base plan tokens).
    *
    * Resolves with the {@link TransactionInfo} on success. A user cancellation, a pending
-   * (deferred / ask-to-buy) purchase, and a store failure all **reject** — natively they throw, and
-   * the wrapper surfaces that as `PURCHASE_ERROR`. Catch the rejection; do not test a status field.
+   * (deferred / ask-to-buy) purchase, and a store failure all **reject** — natively they throw.
+   * The rejection's `code` is an {@link AppDNAPurchaseErrorCode}: branch on it, never on the message.
    */
   static async purchase(
     productId: string,
@@ -166,7 +250,17 @@ export class AppDNABilling {
     const sub = addNativeListener<EntitlementsChangedPayload>('onEntitlementsChanged', (data) =>
       callback(data.entitlements ?? []),
     );
-    return () => sub.remove();
+    // Counted so `configure()` can re-arm native for a subscriber that outlived a `shutdown()`.
+    liveEntitlementSubscribers += 1;
+    let removed = false;
+    return () => {
+      // Guarded: an unsubscribe called twice must not decrement twice, or a still-live subscriber
+      // goes uncounted and stays dead after the next shutdown → configure.
+      if (removed) return;
+      removed = true;
+      liveEntitlementSubscribers -= 1;
+      sub.remove();
+    };
   }
 
   /**

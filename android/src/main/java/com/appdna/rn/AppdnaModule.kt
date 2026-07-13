@@ -152,6 +152,16 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         promise: Promise,
         errorCode: String,
         dispatcher: CoroutineContext = EmptyCoroutineContext,
+        /**
+         * Derive the reject CODE from the throwable, instead of using the one fixed [errorCode].
+         *
+         * Only `purchase()` needs it, and it needs it badly: a cancel, an ask-to-buy, a declined card
+         * and a dead network all arrived as `PURCHASE_ERROR` with a LOCALIZED message, so a host had
+         * to string-match prose in the device's language to decide whether to say anything at all.
+         * When this is supplied it WINS over [errorCode] — it is total (`billingErrorType` returns
+         * "unknown" rather than throwing), so [errorCode] is then only the cancellation fallback.
+         */
+        errorCodeFor: ((Throwable) -> String)? = null,
         block: suspend (SettleOncePromise) -> Unit,
     ) {
         val pending = SettleOncePromise(promise)
@@ -166,7 +176,7 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
                 pending.reject(INVALIDATED_CODE, INVALIDATED_MESSAGE, e)
                 throw e
             } catch (e: Throwable) {
-                pending.reject(errorCode, e.message, e)
+                pending.reject(errorCodeFor?.invoke(e) ?: errorCode, e.message, e)
             } finally {
                 pendingPromises.remove(pending)
             }
@@ -362,29 +372,37 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * 🔴 RESOLVES A BOOLEAN — `false` means nothing was presented.
+     *
+     * This used to resolve SUCCESSFULLY whatever happened: an unknown paywall id, an unconfigured SDK,
+     * a runtime-locked SDK. `await AppDNA.paywall.present('typo_id')` reported success and no paywall
+     * ever appeared. `presentOnboarding` above has always reported this honestly; so does `showScreen`.
+     *
+     * And the missing-host case no longer forks per platform: this rejected `NO_ACTIVITY` while iOS
+     * rejected `NO_VIEW_CONTROLLER` for the SAME condition, so a host had to branch on `Platform.OS` to
+     * catch its own error. Both now resolve `false` — the same answer they give for every other reason
+     * the paywall did not appear, and the same answer `presentOnboarding` already gives.
+     */
     override fun presentPaywall(paywallId: String, context: ReadableMap?, promise: Promise) {
-        val activity = reactContext.currentActivity
-            ?: return promise.reject("NO_ACTIVITY", "presentPaywall requires a foreground Activity")
+        val activity = reactContext.currentActivity ?: return promise.resolve(false)
         // Parse on the JS thread — this method's own contract, stated in `configure` above: a
         // ReadableMap is only valid on the thread the bridge delivered it on. Reading it inside
         // `runOnUiThread` reads it after this method has RETURNED, on another thread, which is
         // undefined behaviour and can hand the paywall an empty customData with no error anywhere.
         val paywallContext = parsePaywallContext(context, fallbackPlacement = "")
         activity.runOnUiThread {
-            AppDNA.presentPaywall(activity, paywallId, paywallContext)
-            promise.resolve(null)
+            promise.resolve(AppDNA.presentPaywall(activity, paywallId, paywallContext))
         }
     }
 
     /** N17 — an iOS overload, a distinct Android name. The wrapper exposes one name for both. */
     override fun presentPaywallByPlacement(placement: String, context: ReadableMap?, promise: Promise) {
-        val activity = reactContext.currentActivity
-            ?: return promise.reject("NO_ACTIVITY", "presentPaywallByPlacement requires a foreground Activity")
+        val activity = reactContext.currentActivity ?: return promise.resolve(false)
         // Same as `presentPaywall`: read the ReadableMap on the thread that delivered it.
         val paywallContext = parsePaywallContext(context, fallbackPlacement = placement)
         activity.runOnUiThread {
-            AppDNA.presentPaywallByPlacement(activity, placement, paywallContext)
-            promise.resolve(null)
+            promise.resolve(AppDNA.presentPaywallByPlacement(activity, placement, paywallContext))
         }
     }
 
@@ -491,13 +509,31 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
 
     // ── Billing ───────────────────────────────────────────────────────────────
 
+    /**
+     * 🔴 The reject CODE is the SDK's own `billingErrorType` discriminator — `userCancelled`,
+     * `pending`, `productNotFound`, `verificationFailed`, `networkError`, `serverError`,
+     * `providerNotAvailable`, `unknown` — not one blanket `PURCHASE_ERROR`.
+     *
+     * Every failure used to arrive as `PURCHASE_ERROR` with a LOCALIZED message, so a host that wanted
+     * to do the one thing every store app does — stay silent when the user taps Cancel, offer a retry
+     * when the card is declined — had to regex English prose on a device that might be in Japanese.
+     * The discriminator has existed the whole time and is already handed to
+     * `onPaywallPurchaseFailed(errorType:)`; it was simply `internal`, so this module could not see it.
+     *
+     * It is passed through VERBATIM, with no translation table — a table is a thing that can fork, and
+     * iOS emits these same strings.
+     */
     override fun purchase(productId: String, offerToken: String?, promise: Promise) {
         // Play's purchase flow is Activity-bound. Without one there is nothing to launch from, and a
         // silent no-op would look like a user who dismissed the sheet.
         val activity = reactContext.currentActivity
             ?: return promise.reject("NO_ACTIVITY", "purchase() requires a foreground Activity")
         val options = offerToken?.let { ai.appdna.sdk.billing.PurchaseOptions(offerToken = it) }
-        launchSettling(promise, "PURCHASE_ERROR") { p ->
+        launchSettling(
+            promise,
+            "PURCHASE_ERROR",
+            errorCodeFor = { ai.appdna.sdk.billing.billingErrorType(it) },
+        ) { p ->
             val result = AppDNA.billing.purchase(activity, productId, options)
             p.resolve(AppdnaBridge.toWritableMap(AppdnaMappers.map(result)))
         }

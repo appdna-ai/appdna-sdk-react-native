@@ -101,14 +101,18 @@ export interface Spec extends TurboModule {
   /** Present an onboarding flow. Resolves false when no view controller / activity is available. */
   presentOnboarding(flowId: string): Promise<boolean>;
 
-  /** Present a paywall by id. */
-  presentPaywall(paywallId: string, context?: Object): Promise<void>;
+  /**
+   * Present a paywall by id. Resolves **false** when nothing was presented: unknown paywall id, SDK
+   * not configured, runtime-locked, or no view controller / Activity. It used to resolve success in
+   * all four cases — `present('typo_id')` reported OK and showed nothing.
+   */
+  presentPaywall(paywallId: string, context?: Object): Promise<boolean>;
 
   /**
    * Present the paywall configured for a placement (N17: an iOS overload, a distinct Android
-   * name).
+   * name). Resolves false when no paywall matched — see `presentPaywall`.
    */
-  presentPaywallByPlacement(placement: string, context?: Object): Promise<void>;
+  presentPaywallByPlacement(placement: string, context?: Object): Promise<boolean>;
 
   /** Present a survey by id. */
   presentSurvey(surveyId: string): Promise<void>;

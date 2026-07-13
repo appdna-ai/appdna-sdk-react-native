@@ -520,6 +520,13 @@ internal object AppdnaVetoDecoder {
 
     /** map-or-null → `StepConfigOverride?`, field by field. */
     fun stepConfigOverride(reply: Any?): StepConfigOverride? {
+        // 🔴 THE SENTINEL IS NOT AN OVERRIDE. `{"__appdna_unhandled":true}` IS a map, so this returned
+        // a non-null override with every field null — for every step, on every RN host with no
+        // `onBeforeStepRender` (the default). Android's `copy(...)` merge made that harmless; iOS's
+        // field-by-field rebuild silently dropped `chat_config`. Both are fixed, but "no handler
+        // registered" must not decode as an instruction to override anything.
+        if (isUnhandled(reply)) return null
+
         val map = reply as? Map<*, *> ?: return null
         return StepConfigOverride(
             fieldDefaults = map["fieldDefaults"]?.let { anyMap(it) },

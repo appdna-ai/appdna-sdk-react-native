@@ -92,8 +92,22 @@ public final class AppdnaModuleImpl: NSObject {
     /// change was delivered twice, forever. Android has guarded exactly this case since P2c
     /// (`AppdnaModule.kt`, remove-then-add on `webEntitlementListener`); `observeConfigUpdates()`
     /// below is guarded for the same reason. iOS was the one that was not.
+    ///
+    /// 🔴 REMOVE-then-ADD, not "return early if we already have a token".
+    ///
+    /// The early return was a one-way door. The token is cleared only in `invalidate()` (bridge
+    /// teardown) — but native `AppDNA.shutdown()` calls `webEntitlementChangeHandlers.removeAll()`, and
+    /// nothing told this object about it. So on the second `configure()` of a
+    /// `configure → shutdown → configure` cycle, the wrapper saw a non-nil token and REFUSED to
+    /// re-register, while native had nothing registered: `onWebEntitlementChanged` was dead for the
+    /// rest of the process. Android re-registers on every configure (`AppdnaModule.kt`) — same JS, one
+    /// platform deaf. Removing a token native has already dropped is a no-op, so this is still
+    /// idempotent against a double `configure()` with no shutdown, which is what the guard was for.
     private func observeWebEntitlementChanges() {
-        if webEntitlementObserverToken != nil { return }
+        if let token = webEntitlementObserverToken {
+            AppDNA.removeWebEntitlementChangedHandler(token)
+            webEntitlementObserverToken = nil
+        }
         webEntitlementObserverToken = AppDNA.onWebEntitlementChanged { [weak self] entitlement in
             self?.emit("onWebEntitlementChanged", ["entitlement": entitlement?.toMap() as Any])
         }
@@ -290,6 +304,16 @@ public final class AppdnaModuleImpl: NSObject {
         }
     }
 
+    /// 🔴 RESOLVES A BOOLEAN — `false` means nothing was presented.
+    ///
+    /// This used to resolve SUCCESSFULLY whatever happened: an unknown paywall id, an unconfigured
+    /// SDK, a runtime-locked SDK. `await AppDNA.paywall.present('typo_id')` reported success and no
+    /// paywall ever appeared. `presentOnboarding` above has always reported this honestly.
+    ///
+    /// And the missing-host case no longer forks per platform: this rejected `NO_VIEW_CONTROLLER`
+    /// while Android rejected `NO_ACTIVITY` for the SAME condition, so a host had to branch on
+    /// `Platform.OS` to catch its own error. Both now resolve `false` — the answer they already give
+    /// for every other reason the paywall did not appear.
     @objc(presentPaywall:context:resolve:reject:)
     public func presentPaywall(
         _ paywallId: String,
@@ -298,11 +322,12 @@ public final class AppdnaModuleImpl: NSObject {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            guard let top = AppDNA.topViewController() else {
-                return reject("NO_VIEW_CONTROLLER", "presentPaywall requires a visible view controller", nil)
-            }
-            AppDNA.presentPaywall(id: paywallId, from: top, context: self.parsePaywallContext(context as? [String: Any], fallbackPlacement: ""))
-            resolve(nil)
+            guard let top = AppDNA.topViewController() else { return resolve(false) }
+            resolve(AppDNA.presentPaywall(
+                id: paywallId,
+                from: top,
+                context: self.parsePaywallContext(context as? [String: Any], fallbackPlacement: "")
+            ))
         }
     }
 
@@ -315,11 +340,12 @@ public final class AppdnaModuleImpl: NSObject {
         reject: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
-            guard let top = AppDNA.topViewController() else {
-                return reject("NO_VIEW_CONTROLLER", "presentPaywallByPlacement requires a visible view controller", nil)
-            }
-            AppDNA.presentPaywall(placement: placement, from: top, context: self.parsePaywallContext(context as? [String: Any], fallbackPlacement: placement))
-            resolve(nil)
+            guard let top = AppDNA.topViewController() else { return resolve(false) }
+            resolve(AppDNA.presentPaywall(
+                placement: placement,
+                from: top,
+                context: self.parsePaywallContext(context as? [String: Any], fallbackPlacement: placement)
+            ))
         }
     }
 
@@ -466,7 +492,19 @@ public final class AppdnaModuleImpl: NSObject {
                 let result = try await AppDNA.billing.purchase(productId)
                 resolve(AppdnaMappers.map(result))
             } catch {
-                reject("PURCHASE_ERROR", error.localizedDescription, error)
+                // 🔴 The CODE is the SDK's own `billingErrorType` discriminator — `userCancelled`,
+                // `pending`, `productNotFound`, `verificationFailed`, `networkError`, `serverError`,
+                // `providerNotAvailable`, `unknown` — not one blanket `PURCHASE_ERROR`.
+                //
+                // Every failure used to arrive as `PURCHASE_ERROR` with a LOCALIZED message, so a host
+                // that wanted to do the one thing every store app does — stay silent when the user taps
+                // Cancel, offer a retry when the card is declined — had to regex English prose on a
+                // device that might be in Japanese. The discriminator has existed the whole time and is
+                // already handed to `onPaywallPurchaseFailed(errorType:)`.
+                //
+                // Passed through VERBATIM, with no translation table: a table is a thing that can fork,
+                // and Android emits these same strings.
+                reject(billingErrorType(error), error.localizedDescription, error)
             }
         }
     }

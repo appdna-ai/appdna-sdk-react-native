@@ -51,13 +51,41 @@ const mockAndroidProduct = {
   offerToken: 'offer-abc',
 };
 
+/**
+ * iOS `AppdnaMappers.map(_ entitlement: Entitlement)` — key for key.
+ *
+ * `identifier` + `productId` + `isActive`, and `expiresAt` OMITTED when there is no expiry (the mapper
+ * refuses to bridge NSNull: "absent means no expiry"). There is no `store`, no `status`, no `isTrial`,
+ * no `offerType` — iOS's core `Entitlement` has no such concepts.
+ */
+const mockIosEntitlement = {
+  identifier: 'premium',
+  productId: 'premium_monthly',
+  isActive: true,
+};
+
+/** Android `AppdnaMappers.map(entitlement)` — the union, with `isActive` synthesised from `status`. */
+const mockAndroidEntitlement = {
+  identifier: 'premium_yearly',
+  productId: 'premium_yearly',
+  isActive: true,
+  expiresAt: '2027-01-01T00:00:00Z',
+  store: 'play',
+  status: 'trialing',
+  isTrial: true,
+  offerType: 'free_trial',
+};
+
 const mockModule = {
   purchase: jest.fn(async () => mockTransaction),
   getProducts: jest.fn(async () => [mockIosProduct, mockAndroidProduct]),
   // `List<String>` — restored product IDs. NOT `Entitlement[]`, whatever the docs used to say.
   restorePurchases: jest.fn(async () => ['premium_monthly']),
+  getEntitlements: jest.fn(async () => [mockIosEntitlement, mockAndroidEntitlement]),
+  startEntitlementObserver: jest.fn(async () => undefined),
   presentOnboarding: jest.fn(async () => true),
-  presentPaywall: jest.fn(async () => undefined),
+  presentPaywall: jest.fn(async () => true),
+  presentPaywallByPlacement: jest.fn(async () => false),
   // The sentinel `requireNativeModule` checks to detect the legacy bridge.
   onInitDegraded: () => ({ remove: () => undefined }),
 };
@@ -135,6 +163,64 @@ describe('ProductInfo carries priceMicros — the field that actually crosses th
   });
 });
 
+/**
+ * 🔴 `Entitlement` — the one shape this file used to skip, and the one that lied hardest.
+ *
+ * The type declared `{productId, store, status, expiresAt, isTrial, offerType}`, ALL REQUIRED, and it
+ * matched NEITHER mapper. `identifier` and `isActive` — the two keys BOTH platforms send, and the only
+ * ones a host can act on cross-platform — were not on the type at all. Meanwhile `status` was typed
+ * `string` while being ABSENT on iOS, so `if (e.status === 'active')` compiled, ran, and was ALWAYS
+ * FALSE there: an iOS subscriber read as unentitled, forever, with no error anywhere.
+ *
+ * These mocks ARE the two mappers' outputs. The `@ts-expect-error` lines are the regression gate:
+ * `tsc` fails on an UNUSED `@ts-expect-error`, so if the fields ever go back to being required, the
+ * typecheck goes red here. A runtime assertion cannot catch a type that lies — which is how this one
+ * survived every green run the package ever had.
+ */
+describe('Entitlement is the union both mappers actually emit', () => {
+  it('carries identifier + productId + isActive on BOTH platforms', async () => {
+    const [ios, android] = await AppDNA.billing.getEntitlements();
+
+    // The cross-platform question. Neither key existed on the old type.
+    expect(ios!.identifier).toBe('premium');
+    expect(ios!.isActive).toBe(true);
+    expect(android!.isActive).toBe(true);
+    // Android synthesises `isActive` from a Play status a host should never have to learn.
+    expect(android!.status).toBe('trialing');
+  });
+
+  it('omits the platform-specific keys on iOS rather than faking them (N11)', async () => {
+    const [ios] = await AppDNA.billing.getEntitlements();
+
+    expect(Object.keys(ios!).sort()).toEqual(['identifier', 'isActive', 'productId']);
+    // These were REQUIRED on the old type. Every one of them is `undefined` on a real iOS device.
+    const raw = ios as unknown as Record<string, unknown>;
+    expect(raw.status).toBeUndefined();
+    expect(raw.store).toBeUndefined();
+    expect(raw.isTrial).toBeUndefined();
+    expect(raw.expiresAt).toBeUndefined();
+  });
+
+  it('makes the iOS-absent fields OPTIONAL in the TYPE — the old ones were required', async () => {
+    const [ios] = await AppDNA.billing.getEntitlements();
+
+    // @ts-expect-error — `status` is `string | undefined` (Android-only). Under the old type it was a
+    // required `string`, so this assignment compiled — and on iOS it assigned `undefined` to a
+    // `string`, which is the whole defect in one line.
+    const status: string = ios!.status;
+    // @ts-expect-error — same for `store`.
+    const store: string = ios!.store;
+    // @ts-expect-error — a missing expiry is an OMITTED key, so `expiresAt` is `string | undefined`.
+    // The old type said `string | null`, which is the shape of this assignment — and it told hosts
+    // that `if (e.expiresAt === null)` would fire. It never did, on EITHER platform: the key is not
+    // sent at all, so the value is `undefined`.
+    const expiresAt: string | null = ios!.expiresAt;
+    expect(expiresAt).toBeUndefined();
+
+    expect([status, store]).toHaveLength(2);
+  });
+});
+
 describe('restorePurchases() resolves product IDs, not entitlements', () => {
   it('resolves a string[] — the docs claimed Entitlement[]', async () => {
     const restored = await AppDNA.billing.restorePurchases();
@@ -170,6 +256,40 @@ describe('presentOnboarding takes a flowId and nothing else', () => {
  * This asserts the WIRE, not the type: that all four fields survive the crossing. A type-only fix with
  * no test is how the surface went dead in the first place.
  */
+/**
+ * 🔴 `present()` RESOLVED SUCCESSFULLY WHEN NOTHING WAS SHOWN.
+ *
+ * An unknown paywall id, an unconfigured SDK, a runtime-locked SDK (suspended tenant) — all three
+ * logged a native line and returned `void`, and the wrapper resolved. `await
+ * AppDNA.paywall.present('typo_id')` reported success and no paywall ever appeared: a host could ship
+ * a typo'd id to production and every signal it had said the paywall was working.
+ *
+ * `presentOnboarding` and `showScreen` have always returned a Boolean. Both natives now do the same
+ * lookup up front — `PaywallManager.hasPaywall(id:)` / `hasPaywallForPlacement` — and the wrapper
+ * hands that answer to the promise. `false` also covers "no host view / Activity", which used to
+ * reject with `NO_VIEW_CONTROLLER` on iOS and `NO_ACTIVITY` on Android: the same condition, two codes,
+ * so a host had to branch on `Platform.OS` to catch its own error.
+ */
+describe('present() reports whether a paywall was actually presented', () => {
+  it('resolves the native boolean, not undefined', async () => {
+    const shown = await AppDNA.paywall.present('pw_1');
+    const notShown = await AppDNA.paywall.presentByPlacement('no_such_placement');
+
+    expect(shown).toBe(true);
+    // The case that used to be indistinguishable from success.
+    expect(notShown).toBe(false);
+  });
+
+  it('is typed `Promise<boolean>`, so `if (!shown)` compiles', async () => {
+    const shown: boolean = await AppDNA.paywall.present('pw_1');
+    // @ts-expect-error — it is NOT `Promise<void>` any more. Under the old type this assignment was
+    // the error, which is why no host ever checked the result: there was nothing to check.
+    const asVoid: void = await AppDNA.paywall.present('pw_1');
+
+    expect([shown, asVoid]).toHaveLength(2);
+  });
+});
+
 describe('PaywallContext carries every field the natives read', () => {
   it('experiment and variant reach the native module', async () => {
     await AppDNA.paywall.present('pw_1', {
