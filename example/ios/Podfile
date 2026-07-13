@@ -30,10 +30,27 @@ target 'AppdnaExample' do
   # So this is the supported way to pass an option autolinking cannot: declare it first and let
   # autolinking stand down. Declared AFTER, it would be a duplicate and CocoaPods would object.
   #
-  # `:testspecs` generates the `appdna-sdk-react-native-Tests` scheme (plus its app host, which the
-  # tests need for a real run loop). It changes nothing about the app target itself.
+  # `:testspecs` generates the `appdna-sdk-react-native-Unit-Tests` scheme (plus its app host, which
+  # the tests need for a real run loop). It changes nothing about the app target itself. Note the
+  # name: a test_spec of the default `:unit` type becomes `<pod>-Unit-Tests`, NOT `<pod>-Tests`.
+  #
+  # 🔴 :path is the SOURCE package, not `../node_modules/@appdna-ai/react-native-sdk`. Pointing it at
+  # node_modules made `pod install` fail outright:
+  #
+  #     [!] Unable to install the `appdna-sdk-react-native` pod, because the
+  #         `appdna-sdk-react-native-Unit-Tests` target in Xcode would have no sources to compile.
+  #
+  # The node_modules copy is materialised from package.json's `files` allowlist, which carries an
+  # explicit `!ios/Tests` — so the test sources are, correctly, NOT in the npm tarball, and a pod
+  # installed from that copy has a test_spec pointing at a directory that does not exist. Shipping
+  # the tests to fix this would be the wrong trade (it bloats every consumer's install to serve our
+  # CI); building the pod from source is the right one, and it has the side benefit of killing the
+  # stale-npm-copy trap that made the Android wrapper compile against yesterday's Kotlin.
+  #
+  # A real consumer is unaffected: autolinking installs this pod WITHOUT `:testspecs`, so the
+  # test_spec is never instantiated and the missing directory is never looked for.
   pod 'appdna-sdk-react-native',
-      :path => '../node_modules/@appdna-ai/react-native-sdk',
+      :path => '../../',
       :testspecs => ['Tests']
 
   config = use_native_modules!
