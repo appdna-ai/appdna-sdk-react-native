@@ -107,7 +107,25 @@ internal class OnboardingForwarder(
         // configure(), so that gate never fires for RN, and a JS host with no `onBeforeStepAdvance`
         // used to get `.proceed` — advancing PAST THE CREDENTIAL STEP WITHOUT AUTHENTICATING ANYONE.
         // The delegate-presence check is a proxy for "will someone handle this"; for a wrapper it lies.
-        if (AppdnaVetoDecoder.isUnhandled(reply) && isAuthAction(stepData)) {
+        // 🔴 AN AUTH ACTION MAY ONLY ADVANCE ON AN EXPLICIT HOST DECISION.
+        //
+        // This blocked on `isUnhandled` ALONE — the "no handler registered" sentinel. But JS declines
+        // to answer in three other ways, and every one of them replies `"null"` (= "no opinion, apply
+        // your default"), which decodes to Proceed:
+        //
+        //   1. the handler THREW (hostCallbacks.ts catches it and answers NO_OPINION);
+        //   2. its promise REJECTED — the host's own sign-in call failed: backend 500, no network;
+        //   3. it exceeded `vetoTimeout` (default 5s) — a SLOW auth backend.
+        //
+        // So the fix that stopped a NO-handler host from advancing past a credential step did nothing
+        // for a host WITH a handler whose auth call fails or is slow. Tap "Continue with email", the
+        // sign-in errors, and the SDK walks the user into the app. A failing backend was free entry.
+        //
+        // Proceed remains available to a host that means it — `{"type":"proceed"}` is an explicit
+        // answer. Silence is not.
+        if (isAuthAction(stepData) &&
+            (AppdnaVetoDecoder.isUnhandled(reply) || AppdnaVetoDecoder.isNoOpinion(reply))
+        ) {
             return StepAdvanceResult.Block(AUTH_UNAVAILABLE_MESSAGE)
         }
         return AppdnaVetoDecoder.stepAdvanceResult(reply)
@@ -432,7 +450,7 @@ internal class InitForwarder(private val emitter: AppdnaEventEmitter) : AppDNAIn
  * by `check:auth-action-parity` — which, when this comment first claimed it, DID NOT EXIST. It does
  * now, and it caught the drift the comment was pretending to prevent.
  */
-private val AUTH_ACTIONS = setOf(
+internal val AUTH_ACTIONS = setOf(
     // 🔴 `social_login` was MISSING here (and on iOS). Android's core enforces it in
     // `emitSocialLoginAction`'s own null-delegate guard rather than in
     // AUTH_ACTIONS_REQUIRING_DELEGATE — but a WRAPPER always attaches a delegate, so that guard
@@ -464,6 +482,16 @@ internal object AppdnaVetoDecoder {
     /** Did JS reply "I have no handler for this hook"? See `UNHANDLED` in hostCallbacks.ts. */
     fun isUnhandled(reply: Any?): Boolean =
         (reply as? Map<*, *>)?.get("__appdna_unhandled") == true
+
+    /**
+     * The host DECLINED TO DECIDE: `"null"` — the wire form of "no opinion, apply your default".
+     *
+     * JS sends this when a registered handler throws or its promise rejects (`hostCallbacks.ts`
+     * catches both), and native synthesises it when the veto exceeds `vetoTimeout`. For most hooks
+     * "apply your default" is exactly right. For an AUTH action it means nobody authenticated — and
+     * the default there is to advance, which is the one answer that must never be given.
+     */
+    fun isNoOpinion(reply: Any?): Boolean = reply !is Map<*, *>
 
     /**
      * `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `Proceed`.

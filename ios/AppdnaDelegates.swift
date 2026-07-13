@@ -90,7 +90,28 @@ final class OnboardingForwarder: NSObject, AppDNAOnboardingDelegate {
         // `onBeforeStepAdvance` used to get `.proceed` — ADVANCING PAST THE CREDENTIAL STEP WITHOUT
         // AUTHENTICATING ANYONE, while a native host stayed put. Delegate-presence is a proxy for
         // "will someone handle this"; for a wrapper the proxy lies, so ask JS instead.
-        if AppdnaVetoDecoder.isUnhandled(reply), AppdnaAuthActions.isAuthAction(stepData) {
+        // 🔴 AN AUTH ACTION MAY ONLY ADVANCE ON AN EXPLICIT HOST DECISION.
+        //
+        // This used to block on `isUnhandled` ALONE — the "no handler registered" sentinel. But there
+        // are three other ways JS declines to answer, and every one of them replied `"null"` (= "no
+        // opinion, apply your default"), which decodes to `.proceed`:
+        //
+        //   1. the handler THREW (hostCallbacks.ts catches and answers NO_OPINION);
+        //   2. its promise REJECTED — i.e. the host's sign-in call failed: backend 500, no network;
+        //   3. it exceeded `vetoTimeout` (default 5s) — i.e. a SLOW auth backend.
+        //
+        // So the fix that stopped a no-handler host advancing past a credential step did nothing for
+        // a host WITH a handler whose auth call fails or is slow. The user taps "Continue with email",
+        // the sign-in errors, and the SDK walks them into the app. A failing backend was free entry.
+        //
+        // The wrapper's own comment said native's default is "the conservative answer for each hook —
+        // reject for a promo code, allow for the rest". For a CREDENTIAL step, allow is not
+        // conservative. Nobody authenticated.
+        //
+        // `.proceed` remains available to a host that means it: `{"type":"proceed"}` is an explicit
+        // answer and decodes as one. Silence is not.
+        if AppdnaAuthActions.isAuthAction(stepData),
+           AppdnaVetoDecoder.isUnhandled(reply) || AppdnaVetoDecoder.isNoOpinion(reply) {
             return .block(message: AppdnaAuthActions.unavailableMessage)
         }
         return AppdnaVetoDecoder.stepAdvanceResult(reply)
@@ -415,6 +436,16 @@ enum AppdnaVetoDecoder {
     /// Did JS reply "I have no handler for this hook"? See `UNHANDLED` in hostCallbacks.ts.
     static func isUnhandled(_ reply: Any?) -> Bool {
         (reply as? [String: Any])?["__appdna_unhandled"] as? Bool == true
+    }
+
+    /// The host DECLINED TO DECIDE: `"null"` — the wire form of "no opinion, apply your default".
+    ///
+    /// JS sends this when a registered handler throws or its promise rejects (`hostCallbacks.ts`
+    /// catches both), and native synthesises it when the veto exceeds `vetoTimeout`. For most hooks
+    /// "apply your default" is exactly right. For an AUTH action it means nobody authenticated, and
+    /// the default (advance) is the one answer that must not be given.
+    static func isNoOpinion(_ reply: Any?) -> Bool {
+        reply == nil || reply is NSNull || !(reply is [String: Any])
     }
 
 

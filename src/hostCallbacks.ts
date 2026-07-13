@@ -88,8 +88,19 @@ async function dispatch(event: HostCallbackEvent): Promise<void> {
       const args = parseNativeJson<Record<string, unknown>>(event.argsJson);
       resultJson = encodeResult(await handler(args));
     } catch (err) {
-      // A host hook that throws must not hang the native surface. Native's default is the
-      // conservative answer for each hook — reject for a promo code, allow for the rest.
+      // A host hook that throws must not hang the native surface, so it answers NO_OPINION — the
+      // wire form of "apply your default".
+      //
+      // 🔴 This comment used to say native's default is "the conservative answer for each hook —
+      // reject for a promo code, allow for the rest". That was WRONG for one hook, and it was the
+      // hook that mattered: on an AUTH action (`email_login`, `social_login`, …) native's default is
+      // to ADVANCE. So a host whose sign-in call rejected — backend 500, no network, or simply slower
+      // than `vetoTimeout` — had the user walked straight past the credential step, unauthenticated.
+      // A failing auth backend was free entry.
+      //
+      // Native now blocks an auth action on ANY non-explicit reply (`AppdnaVetoDecoder.isNoOpinion`),
+      // so this line is safe again. It is still the right thing to send: the decision about what a
+      // silence MEANS belongs next to the surface that acts on it, not here.
       console.error(`[AppDNA] host callback '${event.hook}' threw; applying the native default.`, err);
       resultJson = NO_OPINION;
     }

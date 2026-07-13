@@ -102,6 +102,47 @@ class AuthActionGateTest {
         }
     }
 
+    /**
+     * 🔴 THE THREE WAYS A HOST WITH A HANDLER STILL FAILS TO ANSWER.
+     *
+     * The gate originally blocked only on `__appdna_unhandled` — "no handler registered". But JS
+     * declines to decide in three other ways, and every one of them sends `"null"` ("no opinion,
+     * apply your default"), which decoded to Proceed:
+     *
+     *   1. the handler THREW;
+     *   2. its promise REJECTED — i.e. the host's own sign-in call failed (backend 500, no network);
+     *   3. it exceeded `vetoTimeout` — i.e. a SLOW auth backend.
+     *
+     * So the fix that stopped a NO-handler host advancing past a credential step did nothing for the
+     * far more common case: a host that DOES implement auth, whose auth is simply failing. Tap
+     * "Continue with email", the sign-in errors, and the SDK walks the user into the app.
+     *
+     * A failing auth backend must not be an unlocked door.
+     */
+    @Test
+    fun `a handler that DECLINES TO ANSWER blocks an auth action — throw, reject, timeout`() {
+        // `"null"` is what the JS dispatcher sends for a thrown handler and a rejected promise, and
+        // what native synthesises on veto timeout. All three arrive here identically.
+        val noOpinion = "null"
+
+        for (action in AUTH_ACTIONS) {
+            val result = advance(noOpinion, action)
+            assertTrue(
+                "'$action' ADVANCED on a no-opinion reply — the host's auth call failed or timed " +
+                    "out and the user was let through unauthenticated",
+                result is StepAdvanceResult.Block,
+            )
+        }
+    }
+
+    @Test
+    fun `a no-opinion reply on a NON-auth action still proceeds — the default must not change`() {
+        // Blocking every step whenever a hook throws would turn one bad handler into a dead app.
+        // Only the credential steps get the strict treatment.
+        assertTrue(advance("null", null) is StepAdvanceResult.Proceed)
+        assertTrue(advance("null", "next") is StepAdvanceResult.Proceed)
+    }
+
     @Test
     fun `an auth action WITH a JS handler obeys the host — it is not overridden`() {
         // The host looked at it and said proceed. That is an answer, and it is the host's to make.
