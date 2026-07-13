@@ -390,7 +390,13 @@ final class LifecycleForwarder: NSObject, AppDNALifecycleDelegate {
 /// The actions that need the HOST to do something the SDK cannot: sign in, register, send an OTP.
 /// Mirrors `AuthActionPolicy.delegateRequiredActions` in the core renderer.
 enum AppdnaAuthActions {
+    /// 🔴 `social_login` was MISSING from this set, on both wrappers, and it is the reason
+    /// `check:auth-action-parity` now exists (a comment claimed that gate kept these in step; the
+    /// gate did not exist). The core requires a delegate for 16 actions; this listed 15. So an RN
+    /// host with no `onBeforeStepAdvance` handler had "Continue with Google" ADVANCE THE FLOW with
+    /// nobody authenticated — while a native host in the same situation stayed on the step.
     static let all: Set<String> = [
+        "social_login",
         "login", "register", "reset_password", "magic_link", "verify_email", "resend_verification",
         "enable_biometric", "email_login", "request_otp", "verify_otp", "logout", "change_password",
         "set_new_password", "delete_account", "update_profile",

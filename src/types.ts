@@ -40,7 +40,28 @@ export type AppDNAEnvironment = 'production' | 'sandbox';
 
 export type AppDNALogLevel = 'none' | 'error' | 'warning' | 'info' | 'debug';
 
-export type AppDNABillingProvider = 'storeKit2' | 'revenueCat' | 'none';
+/**
+ * The billing provider that fulfils paywall purchases.
+ *
+ * 🔴 ADAPTY WAS UNREACHABLE FROM TYPESCRIPT. Both natives parse it — as a TAGGED MAP, because unlike
+ * the others it carries an associated value (`AppdnaModuleImpl.swift`, `AppdnaModule.kt` →
+ * `BillingProvider.fromWire`) — and this union listed only the three bare strings. So a React Native
+ * host could not select Adapty at all, while iOS, Android and Flutter hosts could. Dead surface, in
+ * the direction that is hardest to see: nothing crashes, TypeScript simply refuses a value it should
+ * have accepted, and the feature looks absent rather than broken.
+ *
+ * Worse is what happened if a host forced a bare `'adapty'` past the type: neither native matches it
+ * (a bare string carries no apiKey, so it is deliberately REFUSED rather than run keyless), both fall
+ * through to the default — and purchases are silently routed to StoreKit / Play Billing instead of
+ * Adapty. No error. The tagged form makes the apiKey a compile-time requirement, so the keyless case
+ * cannot be written in the first place.
+ */
+export type AppDNABillingProvider =
+  | 'storeKit2'
+  | 'revenueCat'
+  | 'none'
+  /** Adapty needs its SDK key; a keyless Adapty is refused natively, so the type makes it impossible. */
+  | { type: 'adapty'; apiKey: string };
 
 export interface AppDNAOptions {
   /** Automatic flush interval in seconds. Default: 30. */
@@ -51,7 +72,8 @@ export interface AppDNAOptions {
   configTTL?: number;
   /** Log verbosity. Default: 'warning'. */
   logLevel?: AppDNALogLevel;
-  /** Billing provider for paywall purchases (iOS only). Default: 'storeKit2'. */
+  /** Billing provider for paywall purchases. Read by BOTH natives (it was documented "iOS only"
+   *  after Android gained it). Default: 'storeKit2'. */
   billingProvider?: AppDNABillingProvider;
   /**
    * Seconds a host veto may take before native applies the hook's own default. Default 5.

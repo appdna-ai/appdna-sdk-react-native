@@ -68,6 +68,7 @@ jest.mock('react-native', () => ({
 }));
 
 import { AppDNA } from '../src';
+import type { AppDNABillingProvider, AppDNAOptions } from '../src/types';
 
 describe('purchase() resolves a TransactionInfo, not an invented status union', () => {
   it('resolves exactly the four keys the mappers emit', async () => {
@@ -184,5 +185,43 @@ describe('PaywallContext carries every field the natives read', () => {
       variant: 'treatment_b',
       customData: { source: 'settings' },
     });
+  });
+});
+
+/**
+ * 🔴 Adapty was UNREACHABLE from TypeScript.
+ *
+ * Both natives parse `billingProvider` as either a bare string or a TAGGED MAP — Adapty is the one
+ * provider carrying an associated value (its SDK key), so it can only cross as `{type, apiKey}`.
+ * `AppDNABillingProvider` listed only the three bare strings, so an RN host could not select Adapty
+ * at all while iOS, Android and Flutter hosts could.
+ *
+ * And the failure mode for anyone who forced it past the type was worse than a compile error: a bare
+ * `'adapty'` matches NEITHER native (both deliberately refuse a keyless Adapty rather than run it
+ * without a key), both fall through to the default, and purchases route silently to StoreKit / Play
+ * Billing instead of Adapty. Money to the wrong processor, no error anywhere.
+ *
+ * These assertions are about the TYPE, which is the thing that was wrong — the wire shape it produces
+ * is already covered above. `@ts-expect-error` is the oracle: it FAILS THE BUILD if the erroneous
+ * form ever starts compiling, so it pins the keyless case closed rather than merely not testing it.
+ */
+describe('billingProvider — the Adapty tagged map (AC-21 / N1)', () => {
+  it('accepts the tagged map, which is the only shape that carries the key', () => {
+    const opts: AppDNAOptions = { billingProvider: { type: 'adapty', apiKey: 'public_live_xxx' } };
+    expect(opts.billingProvider).toEqual({ type: 'adapty', apiKey: 'public_live_xxx' });
+  });
+
+  it('still accepts the three bare-string providers', () => {
+    const providers: AppDNABillingProvider[] = ['storeKit2', 'revenueCat', 'none'];
+    expect(providers).toHaveLength(3);
+  });
+
+  it('makes a KEYLESS adapty impossible to write — the case that silently fell back to StoreKit', () => {
+    // @ts-expect-error a bare 'adapty' carries no apiKey; both natives refuse it and fall back to the
+    // platform store, so the type must refuse it first.
+    const bare: AppDNABillingProvider = 'adapty';
+    // @ts-expect-error the tag alone is not enough either — the key is the whole point.
+    const keyless: AppDNABillingProvider = { type: 'adapty' };
+    expect([bare, keyless]).toHaveLength(2);
   });
 });

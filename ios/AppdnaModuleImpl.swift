@@ -301,7 +301,7 @@ public final class AppdnaModuleImpl: NSObject {
             guard let top = AppDNA.topViewController() else {
                 return reject("NO_VIEW_CONTROLLER", "presentPaywall requires a visible view controller", nil)
             }
-            AppDNA.presentPaywall(id: paywallId, from: top, context: self.parsePaywallContext(context as? [String: Any]))
+            AppDNA.presentPaywall(id: paywallId, from: top, context: self.parsePaywallContext(context as? [String: Any], fallbackPlacement: ""))
             resolve(nil)
         }
     }
@@ -318,7 +318,7 @@ public final class AppdnaModuleImpl: NSObject {
             guard let top = AppDNA.topViewController() else {
                 return reject("NO_VIEW_CONTROLLER", "presentPaywallByPlacement requires a visible view controller", nil)
             }
-            AppDNA.presentPaywall(placement: placement, from: top, context: self.parsePaywallContext(context as? [String: Any]))
+            AppDNA.presentPaywall(placement: placement, from: top, context: self.parsePaywallContext(context as? [String: Any], fallbackPlacement: placement))
             resolve(nil)
         }
     }
@@ -515,8 +515,12 @@ public final class AppdnaModuleImpl: NSObject {
     /// (`resetEntitlementObserver()` on `shutdown()`) deliberately re-arms so the next subscriber
     /// re-sends this call — so `configure → shutdown → configure` registered a SECOND handler while
     /// the first was still live, and every entitlement change from then on emitted
-    /// `onEntitlementsChanged` twice. N cycles, N duplicate grants per purchase. (Android never had
-    /// this: its `shutdown()` nulls the billing manager, taking its listeners with it.)
+    /// `onEntitlementsChanged` twice. N cycles, N duplicate grants per purchase.
+    ///
+    /// This comment used to add "(Android never had this: its `shutdown()` nulls the billing manager,
+    /// taking its listeners with it.)" — a claim about Android, asserted in a Swift file, and only
+    /// true ACROSS A SHUTDOWN. A plain re-subscribe (re-mount, Fast Refresh) stacked listeners there
+    /// too. Android is idempotent now for the same reason this is.
     @objc(startEntitlementObserver:reject:)
     public func startEntitlementObserver(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         if let token = entitlementObserverToken {
@@ -759,10 +763,26 @@ public final class AppdnaModuleImpl: NSObject {
     }
 
     /// D-s — all four fields. `customData` reaches the `paywall_view` properties bag natively.
-    private func parsePaywallContext(_ dict: [String: Any]?) -> PaywallContext? {
-        guard let dict, let placement = dict["placement"] as? String else { return nil }
+    ///
+    /// 🔴 THIS USED TO DISCARD THE WHOLE CONTEXT WHEN `placement` WAS ABSENT.
+    ///
+    /// `PaywallContext.placement` is optional in TS (types.ts) and non-optional natively, and the
+    /// wrapper "resolved" that mismatch with `guard let placement … else { return nil }` — so
+    ///
+    ///     AppDNA.paywall.presentByPlacement('home_upsell', { customData: { source: 'home' } })
+    ///
+    /// — the natural call, since placement is already argument #1 — threw away customData, experiment
+    /// and variant, in silence. `customData` never reached the `paywall_view` properties bag, which is
+    /// the entire point of the field. No error, no log, nothing to notice. That is the same defect as
+    /// the experiment/variant dead surface documented in types.ts, one layer down: the type said a
+    /// field was optional and the code treated it as mandatory.
+    ///
+    /// `fallbackPlacement` is what the caller already knows: the placement argument for
+    /// `presentByPlacement`, and "" for `presentPaywall(id:)`, which has no placement by definition.
+    private func parsePaywallContext(_ dict: [String: Any]?, fallbackPlacement: String) -> PaywallContext? {
+        guard let dict else { return nil }
         return PaywallContext(
-            placement: placement,
+            placement: (dict["placement"] as? String) ?? fallbackPlacement,
             experiment: dict["experiment"] as? String,
             variant: dict["variant"] as? String,
             customData: dict["customData"] as? [String: Any]

@@ -69,6 +69,39 @@ class AuthActionGateTest {
         assertTrue(advance(unhandled, "next") is StepAdvanceResult.Proceed)
     }
 
+    /**
+     * 🔴 EVERY auth action, not just the one that happened to be tested.
+     *
+     * This suite used to assert exactly one member — `email_login` — and it passed, because
+     * `email_login` was in the set. `social_login` was NOT, on either wrapper, so "Continue with
+     * Google" advanced the flow with nobody authenticated while this test sat green. A test that
+     * exercises one member of a set proves that member, and nothing about the set.
+     *
+     * So the set itself is the subject now: every action the CORE requires a delegate for must block
+     * here. `check:auth-action-parity` pins the set against the core (it did not exist when a comment
+     * first claimed it did); this pins the BEHAVIOUR of every member of it.
+     */
+    @Test
+    fun `EVERY auth action blocks with no JS handler — not just the one we happened to test`() {
+        val required = listOf(
+            "social_login",  // the one that was missing, and the reason this test exists
+            "login", "register", "reset_password", "magic_link", "verify_email", "resend_verification",
+            "enable_biometric", "email_login", "request_otp", "verify_otp", "logout", "change_password",
+            "set_new_password", "delete_account", "update_profile",
+        )
+        assertEquals(
+            "the action list drifted from the wrapper's own set — check:auth-action-parity pins it to the core",
+            AUTH_ACTIONS, required.toSet(),
+        )
+        for (action in required) {
+            val result = advance(unhandled, action)
+            assertTrue(
+                "'$action' ADVANCED with nobody authenticating the user",
+                result is StepAdvanceResult.Block,
+            )
+        }
+    }
+
     @Test
     fun `an auth action WITH a JS handler obeys the host — it is not overridden`() {
         // The host looked at it and said proceed. That is an answer, and it is the host's to make.

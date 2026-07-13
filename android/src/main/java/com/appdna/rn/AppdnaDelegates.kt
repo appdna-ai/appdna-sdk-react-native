@@ -427,10 +427,18 @@ internal class InitForwarder(private val emitter: AppdnaEventEmitter) : AppDNAIn
 
 /**
  * The actions that need the HOST to perform a side effect the SDK cannot: sign in, register, send an
- * OTP. Mirrors `AUTH_ACTIONS_REQUIRING_DELEGATE` in the core's OnboardingActivity — kept in step by
- * `check:auth-action-parity`.
+ * OTP. Mirrors the core's delegate-required actions (iOS `AuthActionPolicy.delegateRequiredActions`
+ * + Android `AUTH_ACTIONS_REQUIRING_DELEGATE` and `emitSocialLoginAction`'s own guard), kept in step
+ * by `check:auth-action-parity` — which, when this comment first claimed it, DID NOT EXIST. It does
+ * now, and it caught the drift the comment was pretending to prevent.
  */
 private val AUTH_ACTIONS = setOf(
+    // 🔴 `social_login` was MISSING here (and on iOS). Android's core enforces it in
+    // `emitSocialLoginAction`'s own null-delegate guard rather than in
+    // AUTH_ACTIONS_REQUIRING_DELEGATE — but a WRAPPER always attaches a delegate, so that guard
+    // never fires for RN and this set is the only thing standing between an unhandled
+    // "Continue with Google" tap and an advanced, unauthenticated flow.
+    "social_login",
     "login", "register", "reset_password", "magic_link", "verify_email", "resend_verification",
     "enable_biometric", "email_login", "request_otp", "verify_otp", "logout", "change_password",
     "set_new_password", "delete_account", "update_profile",

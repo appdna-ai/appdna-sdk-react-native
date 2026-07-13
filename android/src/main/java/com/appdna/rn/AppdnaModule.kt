@@ -369,7 +369,7 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         // ReadableMap is only valid on the thread the bridge delivered it on. Reading it inside
         // `runOnUiThread` reads it after this method has RETURNED, on another thread, which is
         // undefined behaviour and can hand the paywall an empty customData with no error anywhere.
-        val paywallContext = parsePaywallContext(context)
+        val paywallContext = parsePaywallContext(context, fallbackPlacement = "")
         activity.runOnUiThread {
             AppDNA.presentPaywall(activity, paywallId, paywallContext)
             promise.resolve(null)
@@ -381,7 +381,7 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         val activity = reactContext.currentActivity
             ?: return promise.reject("NO_ACTIVITY", "presentPaywallByPlacement requires a foreground Activity")
         // Same as `presentPaywall`: read the ReadableMap on the thread that delivered it.
-        val paywallContext = parsePaywallContext(context)
+        val paywallContext = parsePaywallContext(context, fallbackPlacement = placement)
         activity.runOnUiThread {
             AppDNA.presentPaywallByPlacement(activity, placement, paywallContext)
             promise.resolve(null)
@@ -536,7 +536,23 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * 🔴 IDEMPOTENT. It was not, and the iOS twin's comment claimed Android could not have this bug
+     * ("its `shutdown()` nulls the billing manager, taking its listeners with it") — a statement about
+     * Android, written in a Swift file, that is only true ACROSS A SHUTDOWN.
+     *
+     * Nothing stops a host calling `startEntitlementObserver()` twice without one: a component
+     * re-mount, a re-subscribe, a Fast Refresh in dev. Each call appended another closure to
+     * `entitlementCache`'s listener list — `AppDNA.billing.onEntitlementsChanged` only ever ADDS — so
+     * every entitlement change then emitted `onEntitlementsChanged` N times, and a host that grants
+     * on that event grants N times.
+     *
+     * `removeEntitlementsChangedListener` existed the whole time (AppDNAModules.kt:427); this simply
+     * never called it. It also drains the pending-listener queue, so an observer registered before the
+     * billing manager existed is dropped too, rather than being flushed in later behind our back.
+     */
     override fun startEntitlementObserver(promise: Promise) {
+        entitlementListener?.let { AppDNA.billing.removeEntitlementsChangedListener(it) }
         val listener: (List<ai.appdna.sdk.billing.Entitlement>) -> Unit = { entitlements ->
             emitOnEntitlementsChanged(
                 AppdnaBridge.toWritableMap(
@@ -836,10 +852,17 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
         )
     }
 
-    /** D-s — all four fields. `customData` reaches the `paywall_view` properties bag natively. */
-    private fun parsePaywallContext(map: ReadableMap?): PaywallContext? {
+    /**
+     * D-s — all four fields. `customData` reaches the `paywall_view` properties bag natively.
+     *
+     * 🔴 This used to `return null` when `placement` was absent, discarding the ENTIRE context —
+     * customData, experiment and variant with it — for the most natural call there is:
+     * `presentByPlacement('home_upsell', { customData: {...} })`, where the placement is already
+     * argument #1 and TS declares the context's own `placement` optional. Silent. See the iOS twin.
+     */
+    private fun parsePaywallContext(map: ReadableMap?, fallbackPlacement: String): PaywallContext? {
         val values = AppdnaBridge.toValueMap(map) ?: return null
-        val placement = values["placement"] as? String ?: return null
+        val placement = values["placement"] as? String ?: fallbackPlacement
         @Suppress("UNCHECKED_CAST")
         val custom = values["customData"] as? Map<String, Any>
         return PaywallContext(
