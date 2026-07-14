@@ -197,6 +197,26 @@ describe('a delegate swap replaces the VETO HOOKS too, not just the listeners', 
     expect(replies).toEqual([{ callbackId: 'e1:9', resultJson: '{"__appdna_unhandled":true}' }]);
   });
 
+  it('screens.setDelegate(null) clears the onScreenAction VETO — the one that was left unguarded', async () => {
+    await AppDNA.configure('adn_test_key');
+    AppDNA.screens.setDelegate({
+      onScreenPresented: () => undefined,
+      onScreenDismissed: () => undefined,
+      onFlowCompleted: () => undefined,
+      onScreenAction: () => true,
+    });
+
+    AppDNA.screens.setDelegate(null);
+
+    const listener = (listenersByEvent.get('onHostCallback') ?? [])[0]!;
+    listener({ callbackId: 'e1:9', hook: 'onScreenAction', argsJson: JSON.stringify({ screenId: 's' }) });
+    await new Promise((r) => setImmediate(r));
+
+    // The withdrawn delegate answering `true` here would mean an unmounted screen still vetoing. After
+    // `null`, the seam must report UNHANDLED — no delegate is registered.
+    expect(replies).toEqual([{ callbackId: 'e1:9', resultJson: '{"__appdna_unhandled":true}' }]);
+  });
+
   it('shutdown() drops the veto hooks — a dead delegate must not approve a promo code', async () => {
     await AppDNA.configure('adn_test_key');
     AppDNA.paywall.setDelegate({

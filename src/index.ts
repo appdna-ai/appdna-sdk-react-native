@@ -609,8 +609,17 @@ export class AppDNA {
         addNativeListener<{ screenId: string; result: Record<string, unknown> }>('onScreenDismissed', (data) => delegate?.onScreenDismissed?.(data.screenId, data.result)),
         addNativeListener<{ flowId: string; result: Record<string, unknown> }>('onFlowCompleted', (data) => delegate?.onFlowCompleted?.(data.flowId, data.result)),
       ]);
-      registerHostCallback('onScreenAction', (args) =>
-        delegate?.onScreenAction?.(args.screenId as string, args.action as Record<string, unknown>));
+      // 🔴 THIS VETO REGISTRATION WAS UNCONDITIONAL — the one slot where `setDelegate(null)` did NOT
+      // clear its veto. `setDelegateListeners` clears the slot's host callbacks, and then this line put
+      // one straight back, closing over the withdrawn (or null) delegate. Every OTHER veto in this file
+      // is guarded (`shouldShowMessage`, the onboarding hooks); this one was missed in the same commit.
+      // Guard it so `setDelegate(null)` — and a partial delegate without `onScreenAction` — leaves NO
+      // veto behind. (Benign today because native decodes the reply `?? true`, but the day
+      // `onScreenAction` gains a conservative default, an unmounted delegate would flip it silently.)
+      if (delegate?.onScreenAction) {
+        registerHostCallback('onScreenAction', (args) =>
+          delegate.onScreenAction!(args.screenId as string, args.action as Record<string, unknown>));
+      }
     },
   };
 
