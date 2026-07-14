@@ -105,6 +105,52 @@ describe('setDelegate replaces, it does not stack', () => {
     expect(countListeners('onSurveyPresented')).toBe(1);
   });
 
+  /**
+   * 🔴 AN RN HOST COULD NOT UNSET A DELEGATE AT ALL.
+   *
+   * Every facade `setDelegate` was typed non-nullable (`delegate: AppDNAPushDelegate`) while iOS and
+   * Android both take one that can be nil/null. So a screen that registered a delegate on mount had no
+   * way to withdraw it on unmount: its callbacks — and its VETOES — kept answering from an unmounted
+   * component for the rest of the session.
+   *
+   * That is also why `unregisterHostCallback` looked like dead code. It was the removal half of a pair
+   * whose other half nothing could reach.
+   *
+   * `null` now clears the slot: `setDelegateListeners` already removes the previous subscriptions AND
+   * the slot's host callbacks, so installing nothing is exactly "no delegate".
+   */
+  it('setDelegate(null) CLEARS the delegate — a host can withdraw one on unmount', () => {
+    const seen: string[] = [];
+    AppDNA.surveys.setDelegate(noopSurveyDelegate('mounted', seen));
+    expect(countListeners('onSurveyPresented')).toBe(1);
+
+    AppDNA.surveys.setDelegate(null);
+
+    expect(countListeners('onSurveyPresented')).toBe(0);
+  });
+
+  /**
+   * ...and a PARTIAL delegate is accepted. The facade used to demand every callback of the protocol, so
+   * a host that cared about one of twelve had to stub the other eleven or cast — while
+   * `AppDNABilling.setDelegate` next door already took a `Partial<>`. Same SDK, two contracts.
+   *
+   * Asserts the behaviour a HOST would notice: the callback it implemented fires, and the event for a
+   * callback it did NOT implement is delivered harmlessly instead of throwing
+   * `delegate.onSurveyCompleted is not a function` into its app.
+   */
+  it('a PARTIAL delegate works — implemented callbacks fire, omitted ones do not throw', () => {
+    const seen: string[] = [];
+    AppDNA.surveys.setDelegate({ onSurveyPresented: () => seen.push('presented') });
+
+    for (const l of listenersByEvent.get('onSurveyPresented') ?? []) l({ surveyId: 's1' });
+    expect(seen).toEqual(['presented']);
+
+    // The host never implemented this one. Delivering it must not blow up their app.
+    expect(() => {
+      for (const l of listenersByEvent.get('onSurveyCompleted') ?? []) l({ surveyId: 's1' });
+    }).not.toThrow();
+  });
+
   it('shutdown() drops every delegate slot, not just the config snapshot', async () => {
     const seen: string[] = [];
     AppDNA.surveys.setDelegate(noopSurveyDelegate('x', seen));

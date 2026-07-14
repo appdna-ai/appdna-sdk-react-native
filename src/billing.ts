@@ -273,10 +273,15 @@ export class AppDNABilling {
   /**
    * Set a delegate to receive billing lifecycle callbacks.
    */
-  static setDelegate(delegate: Partial<AppDNABillingDelegate>): void {
+  static setDelegate(delegate: Partial<AppDNABillingDelegate> | null): void {
     // Replaces the previous delegate's listeners. Without this, a remount stacked another set and one
     // `onPurchaseCompleted` invoked every delegate ever registered — N entitlement grants for one buy.
     setDelegateListeners('billing', () => {
+      // `null` CLEARS the delegate: `setDelegateListeners` has already removed the previous slot's
+      // subscriptions and host callbacks, so installing nothing is exactly "no delegate". An RN host
+      // could not unset a delegate at all before — the signature was non-nullable, while iOS and
+      // Android both take one that can be nil/null.
+      if (!delegate) return [];
       const subs = [];
       if (delegate.onPurchaseCompleted) {
         subs.push(addNativeListener<{ productId: string; transaction: Record<string, unknown> }>(

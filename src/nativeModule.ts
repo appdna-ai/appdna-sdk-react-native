@@ -49,10 +49,11 @@ const SENTINEL_EMITTER = 'onInitDegraded';
 
 let cached: Spec | undefined;
 
-/** Whether the native module is present. Never throws — callers decide what absence means. */
-export function hasNativeModule(): boolean {
-  return TurboModuleRegistry.get<Spec>('AppdnaModule') != null;
-}
+// 🔴 `hasNativeModule()` LIVED HERE AND HAD ZERO CALLERS — not in the SDK, not in the example, not in
+// a test. It was never exported from `index.ts` either, so no host could reach it. A public-looking
+// function that nothing calls and nobody can call is not an API; it is a promise the package does not
+// keep. `requireNativeModule()` below is the one everything actually uses, and its error message is the
+// thing a host needs when the module is missing. Deleted.
 
 /** The native module, or a directed error explaining exactly which runtime you are on. */
 export function requireNativeModule(): Spec {
