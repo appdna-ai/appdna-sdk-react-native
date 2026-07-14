@@ -151,4 +151,49 @@ class AuthActionGateTest {
         val blocked = advance("""{"type":"block","message":"Bad password"}""", "email_login")
         assertEquals("Bad password", (blocked as StepAdvanceResult.Block).message)
     }
+
+    /**
+     * 🔴 THE FOURTH WAY OF SAYING NOTHING — AND THE GATE LET IT THROUGH.
+     *
+     * The gate blocked on `isUnhandled || isNoOpinion`, an ENUMERATION of the ways a host declines.
+     * `isNoOpinion` is "the reply is not a map", so a reply that IS a map with no `type` slipped past
+     * both: `stepAdvanceResult` read `map["type"] ?: "proceed"` and advanced the user past the
+     * credential step with nobody having authenticated them.
+     *
+     * These are not exotic. `{}` is what a handler returns when it forgets a return value in a branch;
+     * `{"ok":true}` and `{"user":…}` are what one returns when it hands back its OWN result object
+     * instead of a veto decision. Every one of them read as "yes, let them in".
+     *
+     * The gate now demands a POSITIVE, RECOGNISED decision. There is always one more way to say
+     * nothing; there is only one way to say proceed.
+     */
+    @Test
+    fun `a map-shaped reply that decides NOTHING blocks an auth action`() {
+        val saysNothing = listOf(
+            "{}",                        // handler fell off the end of a branch
+            """{"ok":true}""",           // handler returned its own result object
+            """{"user":{"id":"u1"}}""",  // ...with the signed-in user in it, even
+            """{"type":"banana"}""",     // a type the decoder does not know
+        )
+
+        for (reply in saysNothing) {
+            for (action in AUTH_ACTIONS) {
+                assertTrue(
+                    "'$action' ADVANCED on the reply $reply — a map with no recognised decision is a " +
+                        "host that did not answer, and the user was let through unauthenticated",
+                    advance(reply, action) is StepAdvanceResult.Block,
+                )
+            }
+        }
+    }
+
+    /**
+     * ...and the same replies on a NON-auth step must still take the default. Blocking every step
+     * whose handler returns a stray object would turn one sloppy handler into a dead app.
+     */
+    @Test
+    fun `a map-shaped reply that decides nothing still proceeds on a NON-auth action`() {
+        assertTrue(advance("{}", "next") is StepAdvanceResult.Proceed)
+        assertTrue(advance("""{"ok":true}""", null) is StepAdvanceResult.Proceed)
+    }
 }

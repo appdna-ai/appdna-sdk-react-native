@@ -123,9 +123,14 @@ internal class OnboardingForwarder(
         //
         // Proceed remains available to a host that means it — `{"type":"proceed"}` is an explicit
         // answer. Silence is not.
-        if (isAuthAction(stepData) &&
-            (AppdnaVetoDecoder.isUnhandled(reply) || AppdnaVetoDecoder.isNoOpinion(reply))
-        ) {
+        //
+        // 🔴 AND THERE WAS A FOURTH WAY TO SAY NOTHING: `{}`.
+        //
+        // Blocking on `isUnhandled || isNoOpinion` enumerated the ways of declining, and missed one: a
+        // reply that IS a map with no `type` satisfied neither guard, fell into `stepAdvanceResult`'s
+        // `?: "proceed"` default, and ADVANCED the user unauthenticated. Demand a POSITIVE decision
+        // instead — enumerating silence is a losing game.
+        if (isAuthAction(stepData) && !AppdnaVetoDecoder.isExplicitDecision(reply)) {
             return StepAdvanceResult.Block(AUTH_UNAVAILABLE_MESSAGE)
         }
         return AppdnaVetoDecoder.stepAdvanceResult(reply)
@@ -492,6 +497,34 @@ internal object AppdnaVetoDecoder {
      * the default there is to advance, which is the one answer that must never be given.
      */
     fun isNoOpinion(reply: Any?): Boolean = reply !is Map<*, *>
+
+    /** The decision types [stepAdvanceResult] actually understands. */
+    private val KNOWN_DECISIONS = setOf(
+        "proceed", "proceedWithData", "block", "skipTo", "skipToWithData", "stay",
+    )
+
+    /**
+     * Did the host make an EXPLICIT, RECOGNISED decision?
+     *
+     * 🔴 `{}` IS A MAP, SO IT WAS NEITHER "unhandled" NOR "no opinion" — AND IT ADVANCED.
+     *
+     * The auth gate blocked on `isUnhandled || isNoOpinion`. `isNoOpinion` is "the reply is not a map",
+     * so a reply that IS a map but carries no `type` — `{}`, or `{"ok": true}`, or a handler returning
+     * its own result object by mistake — satisfied neither guard. [stepAdvanceResult] then read
+     * `map["type"] as? String ?: "proceed"` and **proceeded**: the user walked past the credential step
+     * with nobody having authenticated them.
+     *
+     * A returned-but-shapeless object is not a decision; it is a host that has not answered. On an auth
+     * action there is one safe reading of "did not answer", and it is not "let them in". So the gate
+     * demands a POSITIVE answer rather than enumerating the ways of saying nothing — there is always
+     * one more way of saying nothing.
+     */
+    fun isExplicitDecision(reply: Any?): Boolean {
+        val map = reply as? Map<*, *> ?: return false
+        if (map["__appdna_unhandled"] == true) return false
+        val type = map["type"] as? String ?: return false
+        return type in KNOWN_DECISIONS
+    }
 
     /**
      * `{type:"proceed"|"proceedWithData"|"block"|"skipTo"|"stay", …}` → default `Proceed`.

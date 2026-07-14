@@ -110,8 +110,19 @@ final class OnboardingForwarder: NSObject, AppDNAOnboardingDelegate {
         //
         // `.proceed` remains available to a host that means it: `{"type":"proceed"}` is an explicit
         // answer and decodes as one. Silence is not.
+        //
+        // 🔴 AND THERE WAS A FOURTH WAY TO SAY NOTHING: `{}`.
+        //
+        // Blocking on `isUnhandled || isNoOpinion` enumerated the ways of declining — and missed one.
+        // `isNoOpinion` means "the reply is not a map", so a reply that IS a map with no `type` (`{}`,
+        // `{"ok":true}`, a handler returning its own result object) satisfied neither guard, fell into
+        // `stepAdvanceResult`'s `?? "proceed"` default, and ADVANCED the user unauthenticated.
+        //
+        // Enumerating silence is a losing game; there is always one more way to be silent. So this now
+        // demands a POSITIVE, RECOGNISED decision instead. `{"type":"proceed"}` still advances — a host
+        // that means it can still say so.
         if AppdnaAuthActions.isAuthAction(stepData),
-           AppdnaVetoDecoder.isUnhandled(reply) || AppdnaVetoDecoder.isNoOpinion(reply) {
+           !AppdnaVetoDecoder.isExplicitDecision(reply) {
             return .block(message: AppdnaAuthActions.unavailableMessage)
         }
         return AppdnaVetoDecoder.stepAdvanceResult(reply)
@@ -446,6 +457,32 @@ enum AppdnaVetoDecoder {
     /// the default (advance) is the one answer that must not be given.
     static func isNoOpinion(_ reply: Any?) -> Bool {
         reply == nil || reply is NSNull || !(reply is [String: Any])
+    }
+
+    /// The decision types `stepAdvanceResult` actually understands.
+    static let knownDecisions: Set<String> = [
+        "proceed", "proceedWithData", "block", "skipTo", "skipToWithData", "stay",
+    ]
+
+    /// Did the host make an EXPLICIT, RECOGNISED decision?
+    ///
+    /// 🔴 `{}` IS A DICTIONARY, SO IT WAS NEITHER "unhandled" NOR "no opinion" — AND IT ADVANCED.
+    ///
+    /// The auth gate blocked on `isUnhandled || isNoOpinion`. `isNoOpinion` is "the reply is not a
+    /// map", so a reply that IS a map but carries no `type` — `{}`, or `{"ok": true}`, or a handler
+    /// that returns its own result object by mistake — passed both checks. `stepAdvanceResult` then
+    /// read `(map["type"] as? String) ?? "proceed"` and **proceeded**: the user walked past the
+    /// credential step with nobody having authenticated them.
+    ///
+    /// A returned-but-shapeless object is not a decision; it is a host that has not answered the
+    /// question. On an auth action there is exactly one safe reading of "did not answer", and it is
+    /// not "let them in". So the gate now demands a POSITIVE answer rather than enumerating the ways
+    /// of saying nothing — there is always one more way of saying nothing.
+    static func isExplicitDecision(_ reply: Any?) -> Bool {
+        guard let map = reply as? [String: Any] else { return false }
+        if map["__appdna_unhandled"] as? Bool == true { return false }
+        guard let type = map["type"] as? String else { return false }
+        return knownDecisions.contains(type)
     }
 
 

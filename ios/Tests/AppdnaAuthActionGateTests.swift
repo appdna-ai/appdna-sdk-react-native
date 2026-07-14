@@ -101,4 +101,49 @@ final class AppdnaAuthActionGateTests: XCTestCase {
         }
         XCTAssertEqual(message, "Bad password")
     }
+
+    /// 🔴 THE FOURTH WAY OF SAYING NOTHING — AND THE GATE LET IT THROUGH.
+    ///
+    /// The gate blocked on `isUnhandled || isNoOpinion`, an ENUMERATION of the ways a host declines to
+    /// answer. `isNoOpinion` means "the reply is not a map", so a reply that IS a map with no `type`
+    /// satisfied neither guard: `stepAdvanceResult` read `(map["type"] as? String) ?? "proceed"` and
+    /// **proceeded**, walking the user past the credential step with nobody having authenticated them.
+    ///
+    /// None of these are exotic. `{}` is what a handler returns when a branch forgets its return value;
+    /// `{"ok":true}` and `{"user":…}` are what one returns after handing back its OWN result object
+    /// instead of a veto decision. Every one read as "yes, let them in".
+    ///
+    /// The gate now demands a POSITIVE, RECOGNISED decision. There is always one more way to say
+    /// nothing; there is only one way to say proceed.
+    func testAMapShapedReplyThatDecidesNothingBlocksEveryAuthAction() async {
+        let saysNothing = [
+            "{}",                            // handler fell off the end of a branch
+            #"{"ok":true}"#,                 // handler returned its own result object
+            #"{"user":{"id":"u1"}}"#,        // ...with the signed-in user in it, even
+            #"{"type":"banana"}"#,           // a decision type the decoder does not know
+        ]
+
+        for reply in saysNothing {
+            for action in AppdnaAuthActions.all {
+                guard case .block = await advance(reply: reply, action: action) else {
+                    return XCTFail(
+                        "'\(action)' ADVANCED on the reply \(reply) — a map carrying no recognised "
+                            + "decision is a host that did not answer, and the user was let through "
+                            + "unauthenticated"
+                    )
+                }
+            }
+        }
+    }
+
+    /// ...and the same replies on a NON-auth step must still take native's default. Blocking every step
+    /// whose handler returns a stray object would turn one sloppy handler into a dead app.
+    func testAMapShapedReplyThatDecidesNothingStillProceedsOnANonAuthAction() async {
+        guard case .proceed = await advance(reply: "{}", action: "next") else {
+            return XCTFail("a non-auth step must still take native's default")
+        }
+        guard case .proceed = await advance(reply: #"{"ok":true}"#, action: nil) else {
+            return XCTFail("a non-auth step must still take native's default")
+        }
+    }
 }
