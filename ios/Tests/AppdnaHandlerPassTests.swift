@@ -135,6 +135,8 @@ final class AppdnaHandlerPassTests: XCTestCase {
         drive("handleDeepLink", settles: true) { res, rej in impl.handleDeepLink("handler_pass", resolve: res, reject: rej) }
         drive("checkDeferredDeepLink", settles: true) { res, rej in impl.checkDeferredDeepLink(resolve: res, reject: rej) }
         drive("getWebEntitlement", settles: true) { res, rej in impl.getWebEntitlement(resolve: res, reject: rej) }
+        drive("setForcedTheme", settles: true) { res, rej in impl.setForcedTheme("handler_pass" as NSString, resolve: res, reject: rej) }
+        drive("getForcedTheme", settles: true) { res, rej in impl.getForcedTheme(resolve: res, reject: rej) }
         drive("respondToHostCallback", settles: false) { _, _ in impl.respondToHostCallback("handler_pass", resultJson: "handler_pass") }
 
         // LAST, deliberately. `shutdown()` tears the SDK down; driven earlier, every method after it
