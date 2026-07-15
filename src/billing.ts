@@ -67,7 +67,12 @@ export type TransactionInfo = {
   /** App Store / Play transaction identifier. */
   transactionId: string;
   productId: string;
-  /** ISO-8601. Android stores it as a string; iOS formats its `Date` to the same shape. */
+  /**
+   * Epoch milliseconds as a decimal string (e.g. `"1721044800000"`), on BOTH platforms — Android's
+   * Play `purchaseTime` verbatim, iOS's `Date` converted to match. Parse with
+   * `new Date(Number(tx.purchaseDate))`. (It was ISO-8601 on iOS and epoch-millis on Android before —
+   * `new Date(tx.purchaseDate)` gave `Invalid Date` on Android.)
+   */
   purchaseDate: string;
   /** `production` | `sandbox` (iOS also reports `xcode`). */
   environment: string;

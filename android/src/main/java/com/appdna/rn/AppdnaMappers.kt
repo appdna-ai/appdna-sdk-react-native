@@ -35,7 +35,8 @@ internal object AppdnaMappers {
     fun map(tx: TransactionInfo): Map<String, Any?> = mapOf(
         "transactionId" to tx.transactionId,
         "productId" to tx.productId,
-        // Already an ISO-8601 string on Android; iOS formats its `Date` to the same shape.
+        // Epoch-millis as a String (Play `purchaseTime`). iOS now converts its `Date` to the same
+        // epoch-millis shape (was ISO-8601, which made `new Date(tx.purchaseDate)` fail on Android).
         "purchaseDate" to tx.purchaseDate,
         "environment" to tx.environment,
     )

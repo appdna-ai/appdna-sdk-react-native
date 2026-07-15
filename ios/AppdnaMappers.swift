@@ -33,7 +33,12 @@ enum AppdnaMappers {
         [
             "transactionId": tx.transactionId,
             "productId": tx.productId,
-            "purchaseDate": iso.string(from: tx.purchaseDate),
+            // Cross-platform-consistent: emit epoch-millis as a String. Android's
+            // `TransactionInfo.purchaseDate` is already epoch-millis (Play `purchaseTime`); iOS's is a
+            // Date. Matching Flutter (SPEC-070-C MED-2). Previously iOS emitted ISO-8601 while Android
+            // emitted epoch-millis, so a host doing `new Date(tx.purchaseDate)` got a valid date on iOS
+            // and `Invalid Date` on Android.
+            "purchaseDate": String(Int64((tx.purchaseDate.timeIntervalSince1970 * 1000).rounded())),
             "environment": tx.environment,
         ]
     }
