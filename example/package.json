@@ -19,6 +19,8 @@
     "@react-native-community/cli": "15.0.1",
     "@react-native-community/cli-platform-android": "15.0.1",
     "@react-native-community/cli-platform-ios": "15.0.1",
+    "@react-native-community/cli-server-api": "15.0.1",
+    "@react-native-community/cli-tools": "15.0.1",
     "@react-native/babel-preset": "0.76.4",
     "@react-native/metro-config": "0.76.4",
     "@react-native/typescript-config": "0.76.4",
