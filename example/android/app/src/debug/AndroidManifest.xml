@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      Debug-only. Android blocks cleartext (HTTP) traffic by default (API 28+), which silently kills the
+      Metro dev-server connection on a device/emulator: the packager WebSocket and the JS-bundle fetch to
+      `localhost` / `10.0.2.2` are refused, so the app can never load JS from Metro and falls back to a
+      release bundle that a debug build doesn't ship — the "Unable to load script" red box.
+
+      `usesCleartextTraffic` here applies to the DEBUG variant only; the release build keeps cleartext
+      disabled. This is what `react-native init` scaffolds; the hand-built example (SPEC-070-B P1) missed it.
+    -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:targetApi="28"
+        tools:ignore="GoogleAppIndexingWarning" />
+</manifest>
