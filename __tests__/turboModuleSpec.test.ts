@@ -25,7 +25,10 @@
  * the only encoding whose meaning is identical on both. That is a design choice, stated as one.
  *
  * `EventEmitter<T>` as a spec property requires a NON-NULLABLE `T` and lands in RN 0.76 — which is
- * why the peer floor is `>=0.76.4` (D-t).
+ * why CODEGEN works from 0.76.4 up, and why this test measures 0.76.4. The CONSUMER peer floor is
+ * `>=0.76.9` (D-t, corrected): 0.76.4–0.76.8 are DOA for third-party TurboModules via the OnLoad.cpp
+ * autolinking bug (a native app-build issue jest never hits), fixed in 0.76.9. Codegen floor and
+ * consumer floor are deliberately distinct — this suite pins the former.
  */
 import fs from 'node:fs';
 import path from 'node:path';

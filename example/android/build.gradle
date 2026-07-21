@@ -7,7 +7,7 @@ buildscript {
         ndkVersion = "26.1.10909125"
         // The wrapper's android/build.gradle reads this via getExtOrDefault rather than pinning its
         // own — a library must not force its Kotlin on the app that consumes it.
-        kotlinVersion = "1.9.24"
+        kotlinVersion = "1.9.25"
     }
     repositories {
         google()

@@ -21,7 +21,7 @@ AppDNA gives you a single drop-in SDK for the growth surfaces every subscription
 
 ## Requirements
 
-- **React Native 0.76.4+ with the New Architecture enabled.** The SDK ships a TurboModule and a
+- **React Native 0.76.9+ with the New Architecture enabled.** The SDK ships a TurboModule and a
   Fabric component; there is no legacy-bridge fallback, and it will not link on the old architecture.
 - React 18.0+
 - iOS 16.0+ (when targeting iOS)

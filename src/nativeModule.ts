@@ -39,7 +39,7 @@ const DIRECTED_ERROR =
  * SDK works but no callback ever fires".
  */
 const NEW_ARCH_ERROR =
-  '[AppDNA] The AppDNA React Native SDK requires the New Architecture (react-native >= 0.76.4 with\n' +
+  '[AppDNA] The AppDNA React Native SDK requires the New Architecture (react-native >= 0.76.9 with\n' +
   '  `newArchEnabled=true`). The native module was found, but its event emitters are missing, which\n' +
   '  means the app is running on the legacy bridge and no SDK callback would ever fire.\n' +
   '  See https://docs.appdna.ai/sdks/react-native/installation';

@@ -2,7 +2,7 @@
  * SPEC-070-B D-q / D-q1 — Expo config plugin for @appdna-ai/react-native-sdk.
  *
  * Floor: **Expo SDK 52**. ⚠ SDK 52 pins React Native 0.76 exactly, and no Expo SDK ships RN 0.77 or
- * 0.78 (SDK 53 starts at 0.79). The `0.76.4–0.77.x` band in D-c is bare-RN only.
+ * 0.78 (SDK 53 starts at 0.79). The `0.76.9–0.77.x` band in D-c is bare-RN only.
  *
  * ## What this plugin must do, and what it must not
  *
