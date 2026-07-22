@@ -89,4 +89,31 @@ describe('W16 — synchronous config snapshot', () => {
     expect(AppDNA.remoteConfig.getCached('flagA')).toBeUndefined();
     expect(remoteConfigListener).toBeUndefined(); // unsubscribed
   });
+
+  it('shutdown wins over an in-flight refetch — no pre-shutdown config resurrection', async () => {
+    // The race: onRemoteConfigChanged fires and dispatches an async getAllRemoteConfig, THEN shutdown()
+    // runs its synchronous teardown, THEN the in-flight read resolves. Without the liveness guard its
+    // .then reassigns _configSnapshot AFTER shutdown, so getCached() serves pre-shutdown config and it
+    // survives into the next session. Reverting the guard turns this red.
+    await AppDNA.remoteConfig.primeSnapshot();
+    mockModule.getAllRemoteConfig.mockResolvedValueOnce(JSON.stringify({ flagA: false, count: 99 }));
+    remoteConfigListener?.();      // dispatches the refetch; its .then is a pending microtask
+    await AppDNA.shutdown();       // synchronous teardown runs first (nulls the snapshot + sub)
+    await flush();                 // now let the in-flight refetch's .then run — it must no-op
+    expect(AppDNA.remoteConfig.hasSnapshot()).toBe(false);
+    expect(AppDNA.remoteConfig.getCached('count')).toBeUndefined();
+  });
+
+  it('shutdown during an in-flight primeSnapshot wins — the initial fetch does not resurrect', async () => {
+    // Symmetric race on the INITIAL fetch: shutdown lands while primeSnapshot is still awaiting its
+    // first getAllRemoteConfig. The resolved read must not re-populate the snapshot post-shutdown.
+    let resolveFetch!: (v: string) => void;
+    mockModule.getAllRemoteConfig.mockReturnValueOnce(new Promise((r) => { resolveFetch = r; }));
+    const priming = AppDNA.remoteConfig.primeSnapshot(); // in flight, awaiting the initial fetch
+    await AppDNA.shutdown();                             // teardown while the fetch is pending
+    resolveFetch(JSON.stringify({ flagA: true, count: 42 }));
+    await priming;                                        // primeSnapshot's continuation runs (guarded)
+    await flush();
+    expect(AppDNA.remoteConfig.hasSnapshot()).toBe(false);
+  });
 });

@@ -475,19 +475,30 @@ export class AppDNA {
       if (!_configSnapshotSub) {
         _configSnapshotSub = addNativeListener('onRemoteConfigChanged', () => {
           // Re-fetch on change. Fire-and-forget: the read is async, but callers of getCached() see the
-          // new value on the next tick.
+          // new value on the next tick. Capture the live subscription first: a refetch already
+          // dispatched before `shutdown()` (which nulls the sub) — or before a re-prime — must NOT
+          // resurrect `_configSnapshot` after teardown. Without this guard a COMPLETED shutdown still
+          // serves pre-shutdown config via getCached(), and it survives into the next session. Only
+          // write when the subscription is still the current one.
+          const activeSub = _configSnapshotSub;
           void AppdnaModule.getAllRemoteConfig()
             .then((json) => {
-              _configSnapshot = parseNativeJson<Record<string, unknown>>(json);
+              if (_configSnapshotSub === activeSub) {
+                _configSnapshot = parseNativeJson<Record<string, unknown>>(json);
+              }
             })
             .catch(() => {
               /* a torn-down bridge: keep the last snapshot rather than crash */
             });
         });
       }
-      _configSnapshot = parseNativeJson<Record<string, unknown>>(
-        await AppdnaModule.getAllRemoteConfig(),
-      );
+      // Same teardown guard for the initial fetch: a `shutdown()` landing during this await must win,
+      // not be overwritten when the in-flight read resolves.
+      const initialSub = _configSnapshotSub;
+      const initialJson = await AppdnaModule.getAllRemoteConfig();
+      if (_configSnapshotSub === initialSub) {
+        _configSnapshot = parseNativeJson<Record<string, unknown>>(initialJson);
+      }
     },
     /**
      * W16 — synchronous read from the primed snapshot. Returns `undefined` if {@link primeSnapshot}
