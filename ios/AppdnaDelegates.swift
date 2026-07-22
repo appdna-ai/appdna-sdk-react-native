@@ -578,7 +578,13 @@ enum AppdnaVetoDecoder {
     /// Returns nil only when the value is not an object (an absent key), preserving the present-vs-absent
     /// distinction; a present object simply loses its null-valued entries.
     private static func anyMap(_ value: Any?) -> [String: Any]? {
-        guard let map = value as? [String: Any] else { return nil }
+        // Mirror Android's `map[key]?.let { anyMap(it) }` exactly: a truly ABSENT key (or explicit null)
+        // → nil (preserving the outer present-vs-absent distinction), a key PRESENT as a non-object value
+        // → empty map (Android's `anyMap` returns `emptyMap()` for a non-`Map`), an object → itself with
+        // null entries dropped. The non-object→[:] branch only matters for a malformed reply that
+        // violates the host's own types (e.g. `{"fieldDefaults":42}`); valid inputs are unaffected.
+        guard let present = value, !(present is NSNull) else { return nil }
+        guard let map = present as? [String: Any] else { return [:] }
         return map.filter { !($0.value is NSNull) }
     }
 }
