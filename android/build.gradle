@@ -7,6 +7,10 @@ buildscript {
     }
 
     ext.kotlin_version = getExtOrDefault("kotlinVersion", "1.9.22")
+    // Kotlin 2.0 (RN >= 0.77) moved the Compose compiler out of the standalone
+    // `kotlinCompilerExtensionVersion` mechanism into the `org.jetbrains.kotlin.plugin.compose`
+    // Gradle plugin. We support BOTH: the extension path for 1.9.x, the plugin path for 2.0+.
+    ext.isKotlin2 = kotlin_version.tokenize('.')[0].toInteger() >= 2
 
     repositories {
         google()
@@ -16,11 +20,19 @@ buildscript {
     dependencies {
         classpath "com.android.tools.build:gradle:8.2.1"
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // The Compose Compiler Gradle plugin ships versioned with Kotlin from 2.0 on.
+        if (isKotlin2) {
+            classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:$kotlin_version"
+        }
     }
 }
 
 apply plugin: "com.android.library"
 apply plugin: "org.jetbrains.kotlin.android"
+// Kotlin 2.0+ Compose is enabled by applying this plugin (replaces kotlinCompilerExtensionVersion).
+if (isKotlin2) {
+    apply plugin: "org.jetbrains.kotlin.plugin.compose"
+}
 
 // New Architecture only (D-c). The React Gradle plugin generates the TurboModule/Fabric specs this
 // module implements; without it, `NativeAppdnaModuleSpec` does not exist.
@@ -41,17 +53,20 @@ android {
     }
 
     buildFeatures {
-        buildConfig true
         // SPEC-070-B P4: AppdnaScreenSlotView hosts a ComposeView and invokes the native
         // @Composable `AppDNAScreenSlot(name)`, so this module compiles Composable-calling code
-        // and needs the Compose compiler. Compose BoM 2024.02.02 mirrors sdk-android; the compiler
-        // extension is 1.5.14 (Kotlin 1.9.24). Unlike the Flutter plugin (whose host pins Kotlin
-        // 1.9.22), this module inherits the CONSUMER's Kotlin — so we suppress the exact-version
-        // check in kotlinOptions rather than pin an extension that only fits one Kotlin.
+        // and needs the Compose compiler.
+        buildConfig true
         compose true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.5.14'
+    // Kotlin 1.9.x: the standalone Compose compiler extension. 1.5.14 (Kotlin 1.9.24) mirrors
+    // sdk-android; since this wrapper inherits the CONSUMER's Kotlin, suppress the exact-version check
+    // so one extension serves 1.9.22–1.9.25. Kotlin 2.0+: neither block runs — the compose Gradle
+    // plugin applied above owns the compiler, and the extension/suppress path would be REJECTED.
+    if (!isKotlin2) {
+        composeOptions {
+            kotlinCompilerExtensionVersion '1.5.14'
+        }
     }
 
     compileOptions {
@@ -61,19 +76,12 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-        // The Compose compiler hard-fails when its extension version doesn't exactly match the
-        // Kotlin it runs under. Because this wrapper inherits the consumer's Kotlin (default 1.9.22,
-        // example host 1.9.25), suppress the check so one extension serves every supported Kotlin.
-        //
-        // ⚠ This standalone-extension + suppress mechanism is a Kotlin 1.9 construct. Kotlin 2.0
-        // (RN >= 0.77) MOVED the Compose compiler into the `org.jetbrains.kotlin.plugin.compose`
-        // Gradle plugin and REJECTS this path — so the wrapper cannot build under Kotlin 2.0. That is
-        // why the consumer peer range caps at `<0.77.0` (package.json). Supporting RN 0.77+ needs a
-        // Kotlin-version-gated Compose-plugin apply + a real 0.77 device build (follow-up, unvalidated).
-        freeCompilerArgs += [
-            "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=$kotlin_version"
-        ]
+        if (!isKotlin2) {
+            freeCompilerArgs += [
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=$kotlin_version"
+            ]
+        }
     }
 
     sourceSets {
