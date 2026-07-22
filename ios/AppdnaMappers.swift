@@ -94,12 +94,16 @@ enum AppdnaMappers {
         // whole list, so a host that got an `actionId` on tap could not look up the button.
         if !payload.actions.isEmpty {
             out["actions"] = payload.actions.map { a -> [String: Any] in
-                [
+                var m: [String: Any] = [
                     "id": a.id ?? "",
                     "label": a.label ?? "",
                     "action_type": a.type,
-                    "action_value": a.value,
                 ]
+                // Native `value` is a non-optional String that the parser defaults to "" for a
+                // valueless button (e.g. `dismiss`). OMIT the key when empty — Android omits it, and
+                // the canonical action_buttons_parse fixture shows `dismiss` with NO action_value.
+                if !a.value.isEmpty { m["action_value"] = a.value }
+                return m
             }
         }
         return out
