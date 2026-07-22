@@ -224,6 +224,14 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
             return
         }
 
+        // ⚠ Recorded native-level asymmetry (not a wrapper bug): a HARD init failure (storage/DB) rejects
+        // `CONFIGURE_ERROR` here, because Android's native `AppDNA.configure` runs init synchronously and
+        // throws. iOS's `configure` is fire-and-forget (dispatches init to a background queue) and can
+        // never reject — it surfaces the failure via `onInitDegraded` / `getLastInitError` (D-k). Matching
+        // that in the wrapper is not possible without either swallowing the error (worse) or changing the
+        // shared Android native SDK's error handling (cross-cutting, out of scope). Both platforms expose
+        // the D-k channel; only the additional reject here is Android-specific. A host awaiting
+        // `configure()` should still `try/catch` — the strictly-safer superset of the iOS contract.
         launchSettling(promise, "CONFIGURE_ERROR", Dispatchers.Default) { p ->
             AppDNA.configure(reactContext, apiKey, environment, parsed)
             registerDelegates(parsed.vetoTimeout)
@@ -554,7 +562,11 @@ class AppdnaModule(private val reactContext: ReactApplicationContext) :
      */
     override fun purchase(productId: String, offerToken: String?, promise: Promise) {
         // Play's purchase flow is Activity-bound. Without one there is nothing to launch from, and a
-        // silent no-op would look like a user who dismissed the sheet.
+        // silent no-op would look like a user who dismissed the sheet. ⚠ Recorded platform-inherent
+        // asymmetry (not a wrapper bug): iOS StoreKit needs no view controller, so iOS `purchase()` has
+        // no such precondition and proceeds — `NO_ACTIVITY` is Android-only by design and is NOT part of
+        // the shared `billingErrorType` set. Every SHARED failure (cancel/declined/product-not-found/…)
+        // rejects with the identical `billingErrorType` string on both platforms.
         val activity = reactContext.currentActivity
             ?: return promise.reject("NO_ACTIVITY", "purchase() requires a foreground Activity")
         val options = offerToken?.let { ai.appdna.sdk.billing.PurchaseOptions(offerToken = it) }

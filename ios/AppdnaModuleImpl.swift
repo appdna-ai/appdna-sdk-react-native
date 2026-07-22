@@ -468,6 +468,16 @@ public final class AppdnaModuleImpl: NSObject {
     @objc(previewScreen:resolve:reject:)
     public func previewScreen(_ json: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.main.async {
+            // Resolve `false` when there is no host to present into — matching `showScreen`/`showFlow`
+            // above (:439/:451) and Android's `currentActivity ?: resolve(false)`. Native
+            // `previewScreen` returns `true` for any parseable JSON regardless of a top VC, so without
+            // this guard iOS resolved `true` while Android resolved `false` for the same "valid JSON,
+            // no host" input — a console-preview caller checking the boolean saw success on iOS and
+            // failure on Android.
+            guard AppDNA.topViewController() != nil else {
+                resolve(false)
+                return
+            }
             // Forward native's real answer: false when the JSON did not parse. Resolving `true`
             // unconditionally told a console-preview caller its malformed payload had rendered.
             resolve(AppDNA.previewScreen(json: json))
