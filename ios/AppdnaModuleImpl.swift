@@ -109,7 +109,13 @@ public final class AppdnaModuleImpl: NSObject {
             webEntitlementObserverToken = nil
         }
         webEntitlementObserverToken = AppDNA.onWebEntitlementChanged { [weak self] entitlement in
-            self?.emit("onWebEntitlementChanged", ["entitlement": entitlement?.toMap() as Any])
+            // `?? NSNull()`, NOT `as Any`: `entitlement?.toMap()` is `[String: Any]?`, and for a
+            // cleared web entitlement `Optional.none as Any` boxes as a `_SwiftValue` the bridge cannot
+            // represent → the host reads `undefined` on iOS while Android sends `null` (`putNull` on
+            // `mapOf("entitlement" to entitlement?.toMap())`, AppdnaModule.kt). The facade coalesces
+            // `data.entitlement ?? null`, but so did `onPaywallPurchaseFailed`'s productId — R22 still
+            // hardened that emit site rather than lean on the facade alone. Same class, same fix.
+            self?.emit("onWebEntitlementChanged", ["entitlement": entitlement?.toMap() ?? NSNull()])
         }
     }
 
