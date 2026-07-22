@@ -106,8 +106,15 @@ async function dispatch(event: HostCallbackEvent): Promise<void> {
     }
   }
 
-  // A reply for an id native already timed out and evicted is dropped there, not here.
-  AppdnaModule.respondToHostCallback(event.callbackId, resultJson);
+  // A reply for an id native already timed out and evicted is dropped there, not here. Guard the Proxy
+  // get-trap's synchronous throw: `respondToHostCallback` is a sync void native method, and if the
+  // bridge was torn down between subscribing and this reply, that throw would reject this async
+  // `dispatch` as an unhandled rejection. A dropped reply is harmless — native applies its own default.
+  try {
+    AppdnaModule.respondToHostCallback(event.callbackId, resultJson);
+  } catch {
+    /* bridge gone — native falls back to its default for this hook. */
+  }
 }
 
 /**

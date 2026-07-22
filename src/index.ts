@@ -90,6 +90,25 @@ let _configSnapshot: Record<string, unknown> | null = null;
 let _configSnapshotSub: { remove: () => void } | null = null;
 
 /**
+ * Invoke a SYNCHRONOUS, void, fire-and-forget native method safely.
+ *
+ * `AppdnaModule` is a Proxy whose get-trap runs `requireNativeModule()`, which THROWS synchronously
+ * when the native module is absent (Expo Go, the legacy bridge, a missing `pod install`/rebuild, RN
+ * Web, or a call before `configure()`) or torn down. For a NON-async void method that throw would
+ * propagate straight to the caller and crash the host's JS thread — and a void return gives the host
+ * no promise to `.catch()`. Every such method routes through here, so a missing/torn-down bridge is a
+ * no-op rather than a crash. (Async/Promise methods don't need this: an `await` turns the same
+ * synchronous throw into a catchable rejection in the caller's async frame.)
+ */
+function safeSyncInvoke(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    /* swallow: a missing or torn-down native bridge must never crash the app. */
+  }
+}
+
+/**
  * Main entry point for the AppDNA React Native SDK.
  * Thin wrapper around native iOS/Android SDKs via native modules.
  */
@@ -118,7 +137,8 @@ export class AppDNA {
 
   /** Set log verbosity level at runtime. Valid: 'none','error','warning','info','debug'. */
   static setLogLevel(level: AppDNALogLevel): void {
-    AppdnaModule.setLogLevel(level);
+    // Sync void native method — guard the Proxy get-trap's synchronous throw (missing/torn-down bridge).
+    safeSyncInvoke(() => AppdnaModule.setLogLevel(level));
   }
 
   /**
@@ -165,17 +185,11 @@ export class AppDNA {
    * confirmation.
    */
   static track(event: string, properties?: Record<string, unknown>): void {
-    // Fire-and-forget: native `track` is a SYNCHRONOUS void JSI method, and `AppdnaModule` is a Proxy
-    // whose get-trap runs `requireNativeModule()` — which THROWS when the module is absent (Expo Go,
-    // the legacy bridge, a missing `pod install`, or `track()` called before `configure()`) or torn
-    // down. That is a synchronous throw, not a promise rejection, so the old
-    // `Promise.resolve(AppdnaModule.track(...)).catch()` never caught it and could crash the host's JS
-    // thread. A try/catch is the only guard that actually makes track() safe to call anywhere.
-    try {
-      AppdnaModule.track(event, properties);
-    } catch {
-      /* swallow: a missing/torn-down bridge must never crash the app. Use flush() for delivery. */
-    }
+    // Fire-and-forget: native `track` is a SYNCHRONOUS void JSI method. `safeSyncInvoke` guards the
+    // Proxy get-trap's synchronous throw (module absent — Expo Go, legacy bridge, missing `pod
+    // install`, a call before `configure()` — or torn down), which a promise `.catch()` could never
+    // catch and which would otherwise crash the host's JS thread. Use flush() for delivery confirmation.
+    safeSyncInvoke(() => AppdnaModule.track(event, properties));
   }
 
   /** Force flush all queued events. */
@@ -517,7 +531,8 @@ export class AppDNA {
   /** In-app messages module. */
   static inAppMessages = {
     /** W17 — fire-and-forget on the native side; a Promise here would only fake a round trip. */
-    suppressDisplay: (suppress: boolean): void => AppdnaModule.suppressMessages(suppress),
+    suppressDisplay: (suppress: boolean): void =>
+      safeSyncInvoke(() => AppdnaModule.suppressMessages(suppress)),
     /** Set a delegate to receive in-app message lifecycle callbacks. */
     setDelegate: (delegate: Partial<AppDNAInAppMessageDelegate> | null): void => {
       // Replaces the previous delegate's listeners rather than stacking a second set on top.
@@ -691,7 +706,10 @@ export class AppDNA {
 
   /** D-h / AC-22 — announce the visible screen; every subsequent event carries it as `context.screen`. */
   static notifyScreenAppeared(screenName: string): void {
-    AppdnaModule.notifyScreenAppeared(screenName);
+    // Sync void native method, wired into the host's navigation container so it fires on EVERY screen.
+    // Guard the Proxy get-trap's synchronous throw so a not-yet-linked/torn-down bridge can't crash
+    // navigation on every route change (the same hazard track() is guarded against).
+    safeSyncInvoke(() => AppdnaModule.notifyScreenAppeared(screenName));
   }
 
   /** A human-readable diagnostic report, including the consent decision and veto-timeout count. */

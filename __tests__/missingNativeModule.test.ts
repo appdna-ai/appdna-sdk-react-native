@@ -57,6 +57,20 @@ describe('missing native module', () => {
     );
   });
 
+  it('sync void methods do NOT crash the JS thread on a missing/torn-down bridge', () => {
+    // R13: track/setLogLevel/notifyScreenAppeared/suppressDisplay are SYNCHRONOUS void JSI methods a
+    // host calls fire-and-forget — a void return gives no promise to `.catch()`, and the Proxy
+    // get-trap throws SYNCHRONOUSLY when the module is absent. notifyScreenAppeared is wired into the
+    // navigation container (fires on EVERY route change), so an unguarded throw crashes navigation on a
+    // not-yet-linked app. All four must be no-ops here, not throws. (Async methods reject instead — see
+    // the configure() case above.) Reverting any `safeSyncInvoke` guard turns its line red.
+    const { AppDNA } = require('../src');
+    expect(() => AppDNA.track('evt', { a: 1 })).not.toThrow();
+    expect(() => AppDNA.setLogLevel('debug')).not.toThrow();
+    expect(() => AppDNA.notifyScreenAppeared('Home')).not.toThrow();
+    expect(() => AppDNA.inAppMessages.suppressDisplay(true)).not.toThrow();
+  });
+
   it('the error names Expo Go, pod install, and the unsupported runtimes', async () => {
     const { AppDNA } = require('../src');
     const err = await AppDNA.configure('adn_test_placeholder', 'sandbox').catch((e: Error) => e);
