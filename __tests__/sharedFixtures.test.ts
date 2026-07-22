@@ -250,8 +250,10 @@ function assertBridgeContract(fixture: Fixture): void {
       const c = mockCapturedCalls[0]!;
       expect(c.method).toBe('track');
       expect(c.args[0]).toBe(fixture.action.event_name);
-      // SDK passes `properties ?? null` when undefined (per src/index.ts).
-      expect(c.args[1]).toEqual(fixture.action.properties ?? null);
+      // The facade passes `properties` AS-IS (undefined when the fixture omits it — the optional-param
+      // contract), not `?? null`. Asserting `?? null` was a latent trap: a property-less fixture would
+      // fail on `expect(undefined).toEqual(null)`.
+      expect(c.args[1]).toEqual(fixture.action.properties);
       break;
     }
     case 'identify': {
@@ -259,7 +261,7 @@ function assertBridgeContract(fixture: Fixture): void {
       const c = mockCapturedCalls[0]!;
       expect(c.method).toBe('identify');
       expect(c.args[0]).toBe(fixture.action.userId);
-      expect(c.args[1]).toEqual(fixture.action.traits ?? null);
+      expect(c.args[1]).toEqual(fixture.action.traits);
       break;
     }
     case 'show_paywall': {

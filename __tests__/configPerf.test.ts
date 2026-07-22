@@ -8,7 +8,7 @@
 let remoteConfigListener: (() => void) | undefined;
 
 const mockModule = {
-  track: jest.fn().mockResolvedValue(undefined),
+  track: jest.fn().mockReturnValue(undefined), // native track is a synchronous void method
   shutdown: jest.fn().mockResolvedValue(undefined),
   getAllRemoteConfig: jest.fn().mockResolvedValue(JSON.stringify({ flagA: true, count: 42 })),
   onRemoteConfigChanged: (listener: () => void) => {
@@ -42,10 +42,16 @@ describe('W17 — track() is fire-and-forget', () => {
     expect(mockModule.track).toHaveBeenCalledWith('scrolled', { y: 10 });
   });
 
-  it('a native rejection does not surface as an unhandled rejection', async () => {
-    mockModule.track.mockRejectedValueOnce(new Error('bridge torn down'));
+  it('a synchronous native throw (missing / torn-down module) does not crash the caller', () => {
+    // track() is a SYNCHRONOUS void JSI method, and AppdnaModule is a Proxy whose get-trap runs
+    // requireNativeModule() — so a missing/torn-down module throws SYNCHRONOUSLY, not as a promise
+    // rejection. The old Promise.resolve(AppdnaModule.track(...)).catch() could never catch that (it
+    // evaluated the throwing call before wrapping it) and would crash the host; only the try/catch
+    // does. A rejected-promise mock was the wrong model — a void method returns no promise to reject.
+    mockModule.track.mockImplementationOnce(() => {
+      throw new Error('bridge torn down');
+    });
     expect(() => AppDNA.track('e')).not.toThrow();
-    await flush(); // let the swallowed rejection settle
   });
 });
 

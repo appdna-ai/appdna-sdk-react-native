@@ -165,10 +165,17 @@ export class AppDNA {
    * confirmation.
    */
   static track(event: string, properties?: Record<string, unknown>): void {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    Promise.resolve(AppdnaModule.track(event, properties)).catch(() => {
-      /* fire-and-forget: a torn-down bridge must not crash the app */
-    });
+    // Fire-and-forget: native `track` is a SYNCHRONOUS void JSI method, and `AppdnaModule` is a Proxy
+    // whose get-trap runs `requireNativeModule()` — which THROWS when the module is absent (Expo Go,
+    // the legacy bridge, a missing `pod install`, or `track()` called before `configure()`) or torn
+    // down. That is a synchronous throw, not a promise rejection, so the old
+    // `Promise.resolve(AppdnaModule.track(...)).catch()` never caught it and could crash the host's JS
+    // thread. A try/catch is the only guard that actually makes track() safe to call anywhere.
+    try {
+      AppdnaModule.track(event, properties);
+    } catch {
+      /* swallow: a missing/torn-down bridge must never crash the app. Use flush() for delivery. */
+    }
   }
 
   /** Force flush all queued events. */
@@ -448,13 +455,13 @@ export class AppDNA {
      * changes. Cheap to await once; the point is that everything AFTER it is synchronous.
      */
     primeSnapshot: async (): Promise<void> => {
-      _configSnapshot = parseNativeJson<Record<string, unknown>>(
-        await AppdnaModule.getAllRemoteConfig(),
-      );
+      // Subscribe BEFORE the initial fetch: if we fetched first, a config change landing in the gap
+      // before the listener attached would be missed until the NEXT change. Installing the listener
+      // first means every change during (and after) the fetch is delivered.
       if (!_configSnapshotSub) {
         _configSnapshotSub = addNativeListener('onRemoteConfigChanged', () => {
-          // Re-fetch on change so the cache never serves a stale value. Fire-and-forget: the read is
-          // async, but callers of getCached() see the new value on the next tick.
+          // Re-fetch on change. Fire-and-forget: the read is async, but callers of getCached() see the
+          // new value on the next tick.
           void AppdnaModule.getAllRemoteConfig()
             .then((json) => {
               _configSnapshot = parseNativeJson<Record<string, unknown>>(json);
@@ -464,11 +471,18 @@ export class AppDNA {
             });
         });
       }
+      _configSnapshot = parseNativeJson<Record<string, unknown>>(
+        await AppdnaModule.getAllRemoteConfig(),
+      );
     },
     /**
      * W16 — synchronous read from the primed snapshot. Returns `undefined` if {@link primeSnapshot}
      * has not run yet (call it after `configure()`) OR if the key is absent. For per-render flag
      * reads; one-off reads should use the async `get()`.
+     *
+     * READ-ONLY: for an object/array value this returns the shared cached reference (not a copy) so
+     * the per-render read stays allocation-free. Do NOT mutate it — mutating corrupts the cache for
+     * every subsequent reader. Use `get()` (which re-parses fresh JSON) if you need to mutate.
      */
     getCached: (key: string): unknown => _configSnapshot?.[key],
     /** W16 — whether {@link primeSnapshot} has populated the synchronous cache. */

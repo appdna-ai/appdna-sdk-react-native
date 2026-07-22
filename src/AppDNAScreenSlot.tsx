@@ -52,6 +52,21 @@ export interface AppDNAScreenSlotProps {
  */
 const lastKnownHeight = new Map<string, number>();
 
+/**
+ * Bound the cache. The documented assumption is a fixed console slot set, but a host using per-item
+ * names (`slot_${id}` for list rows) would grow it without limit over a long session. Evict
+ * oldest-first (Map preserves insertion order) past the cap — a re-measure on the next mount refills
+ * an evicted entry at the cost of one corrected frame, the same guarantee the cache already makes.
+ */
+const HEIGHT_CACHE_CAP = 128;
+function rememberHeight(name: string, height: number): void {
+  if (!lastKnownHeight.has(name) && lastKnownHeight.size >= HEIGHT_CACHE_CAP) {
+    const oldest = lastKnownHeight.keys().next().value;
+    if (oldest !== undefined) lastKnownHeight.delete(oldest);
+  }
+  lastKnownHeight.set(name, height);
+}
+
 /** Test seam — a module-level cache would otherwise leak between tests. */
 export function __resetScreenSlotHeightCache(): void {
   lastKnownHeight.clear();
@@ -83,7 +98,7 @@ export function AppDNAScreenSlot({
   const handleSize = useCallback(
     (event: NativeSyntheticEvent<{ width: number; height: number }>) => {
       const { width, height } = event.nativeEvent;
-      lastKnownHeight.set(name, height);
+      rememberHeight(name, height);
       setMeasuredHeight(height);
       onContentSizeChange?.({ width, height });
     },
