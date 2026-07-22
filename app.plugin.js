@@ -1,10 +1,11 @@
 /**
  * SPEC-070-B D-q / D-q1 — Expo config plugin for @appdna-ai/react-native-sdk.
  *
- * Floor: **Expo SDK 52** (pins React Native 0.76 exactly — inside our supported range). ⚠ The peer
- * range caps at `<0.77.0`: RN 0.77+ ships Kotlin 2.0, which rejects this module's Kotlin-1.9 Compose
- * config (see android/build.gradle). So Expo SDK 53 (RN 0.79 / Kotlin 2.0) is NOT yet supported, and
- * the bare-RN band D-c validates is `0.76.9–0.76.x`, not the earlier 0.77.x.
+ * Floor: **Expo SDK 52** (pins React Native 0.76 exactly). RN 0.77+ / Kotlin 2.0 IS supported — the
+ * Android module's Compose config is version-gated (see android/build.gradle). ⚠ On Expo SDK 53+
+ * (a Swift AppDelegate) this plugin cannot auto-register the Fabric screen-slot under dynamic
+ * frameworks: it WARNS and skips (the SDK still installs; the slot needs a manual override or static
+ * linking). A native Swift Fabric-registration path is a follow-up.
  *
  * ## What this plugin must do, and what it must not
  *
@@ -81,9 +82,9 @@ const FABRIC_OVERRIDE = `
 }
 `;
 
-const SWIFT_APPDELEGATE_ERROR =
-  '[@appdna-ai/react-native-sdk] This project has a SWIFT AppDelegate (Expo SDK 53+), and the\n' +
-  'AppDNA plugin cannot register the Fabric screen-slot component into it.\n' +
+const SWIFT_APPDELEGATE_WARNING =
+  '[@appdna-ai/react-native-sdk] This project has a SWIFT AppDelegate (Expo SDK 53+), so the\n' +
+  'AppDNA plugin is SKIPPING the Fabric screen-slot registration (the rest of the SDK installs normally).\n' +
   '\n' +
   'Why it matters: the plugin links pods as dynamic frameworks (FirebaseFirestore requires it), and\n' +
   "under dynamic frameworks React Native compiles its third-party component registry OUT. Without a\n" +
@@ -198,7 +199,16 @@ const withAppDNA = (config, props = {}) => {
  */
 const addFabricRegistration = (contents, language) => {
   if (language === 'swift') {
-    throw new Error(SWIFT_APPDELEGATE_ERROR);
+    // Expo SDK 53+ ships a Swift AppDelegate. Injecting the ObjC thirdPartyFabricComponents override
+    // into Swift is not something we can do safely without validating it against a real Expo-53
+    // project, and a blind patch is worse than none. Rather than THROW (which hard-blocks a new
+    // Expo-53 app — Firebase forces dynamic frameworks, so "just link statically" is not always an
+    // out), WARN and skip: the whole SDK still installs and works on Expo 53; only the
+    // dynamic-frameworks <AppDNAScreenSlot> auto-registration is skipped. The warning explains how to
+    // restore it (static linking, a hand override, or screenSlot:"skip" to silence this). A native
+    // Swift Fabric-registration path is a follow-up gated on an Expo-53 validation env.
+    console.warn(SWIFT_APPDELEGATE_WARNING);
+    return contents;
   }
   if (contents.includes('AppdnaFabricComponents')) {
     return contents; // already registered — a re-run, not a second app

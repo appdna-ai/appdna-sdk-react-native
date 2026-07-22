@@ -165,11 +165,20 @@ describe('the Fabric screen slot under dynamic frameworks', () => {
     expect(twice.contents.match(/AppdnaFabricComponents\.h/g)).toHaveLength(1);
   });
 
-  it('refuses a Swift AppDelegate loudly instead of silently leaving the slot dead', () => {
+  it('degrades gracefully on a Swift AppDelegate (Expo 53+): warns + skips, does NOT hard-block', () => {
+    // Expo 53+ ships a Swift AppDelegate. Throwing here hard-blocked every new Expo-53 app (Firebase
+    // forces dynamic frameworks, so static linking is not always an escape). Instead the plugin warns
+    // and skips the ScreenSlot Fabric registration — the SDK still installs; the slot needs a manual
+    // override on Expo 53 (a native Swift path is a follow-up).
     withAppDNA({});
-    expect(() =>
-      runMods('appDelegate', { contents: SWIFT_APPDELEGATE, language: 'swift' }),
-    ).toThrow(/SWIFT AppDelegate/);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let appDelegate: any;
+    expect(() => {
+      appDelegate = runMods('appDelegate', { contents: SWIFT_APPDELEGATE, language: 'swift' });
+    }).not.toThrow();
+    expect(appDelegate.contents).toBe(SWIFT_APPDELEGATE); // untouched — registration skipped, not blind-patched
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/SWIFT AppDelegate/));
+    warn.mockRestore();
   });
 
   it('touches no AppDelegate under static linkage — codegen registers the component there', () => {

@@ -21,8 +21,9 @@ AppDNA gives you a single drop-in SDK for the growth surfaces every subscription
 
 ## Requirements
 
-- **React Native `>=0.76.9 <0.77.0` with the New Architecture enabled.** (RN 0.77+ ships Kotlin 2.0,
-  which this module's Compose config does not yet support — a follow-up.) The SDK ships a TurboModule and a
+- **React Native 0.76.9+ with the New Architecture enabled.** (RN 0.77+/Kotlin 2.0 is supported via a
+  version-gated Compose config; on Expo SDK 53 the SDK installs but `<AppDNAScreenSlot>` needs a manual
+  Fabric registration under dynamic frameworks — a warning explains how.) The SDK ships a TurboModule and a
   Fabric component; there is no legacy-bridge fallback, and it will not link on the old architecture.
 - React 18.0+
 - iOS 16.0+ (when targeting iOS)
