@@ -63,7 +63,7 @@ android {
         jvmTarget = "17"
         // The Compose compiler hard-fails when its extension version doesn't exactly match the
         // Kotlin it runs under. Because this wrapper inherits the consumer's Kotlin (default 1.9.22,
-        // example host 1.9.24), suppress the check so one extension serves every supported Kotlin.
+        // example host 1.9.25), suppress the check so one extension serves every supported Kotlin.
         freeCompilerArgs += [
             "-P",
             "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=$kotlin_version"
