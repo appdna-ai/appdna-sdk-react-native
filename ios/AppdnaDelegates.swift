@@ -212,7 +212,12 @@ final class PaywallForwarder: NSObject, AppDNAPaywallDelegate {
             "paywallId": paywallId,
             "error": error.localizedDescription,
             "errorType": errorType,
-            "productId": productId as Any,
+            // `?? NSNull()`, NOT `as Any`: for a product-less failure (networkError/serverError/unknown
+            // surfaced before a product resolves), `productId as Any` boxes `Optional.none` as a
+            // `_SwiftValue` that the RCTTurboModule bridge cannot represent → the host reads `undefined`
+            // on iOS while Android sends `null` (`putNull`). The delegate contract is `productId: string
+            // | null` (never undefined); this matches the `withNulls`/`last_action` convention.
+            "productId": productId ?? NSNull(),
         ])
     }
 

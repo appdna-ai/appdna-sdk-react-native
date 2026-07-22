@@ -121,4 +121,16 @@ describe('a failed purchase reaches the JS host with its reason and its product'
 
     expect(seen[0]![3]).toBeNull();
   });
+
+  it('an undefined productId (iOS nil-optional boxing) is coalesced to null, never passed through', () => {
+    // R22: iOS boxed a nil `productId` via `as Any` → the RCTTurboModule bridge could not represent it,
+    // so the host saw `undefined` on iOS while Android sent `null`. Native now emits NSNull, and the
+    // facade also coalesces `?? null`, so the delegate NEVER sees `undefined` (contract: `string | null`).
+    const seen: unknown[][] = [];
+    AppDNA.paywall.setDelegate(paywallDelegate(seen));
+
+    emitNativeFailure({ paywallId: 'pw_1', error: 'no config', errorType: 'unknown', productId: undefined });
+
+    expect(seen[0]![3]).toBeNull();
+  });
 });
