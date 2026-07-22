@@ -14,8 +14,8 @@ import AppDNASDK
  different values from the same call and the SDK reports no error on either.
 
  A jest test cannot reach any of this — the native module is mocked away, so it observes neither
- `JSONSerialization`'s `.fragmentsAllowed` nor the `compactMapValues` that decides whether a key is
- absent or `null`.
+ `JSONSerialization`'s `.fragmentsAllowed` nor the `withNulls` null-handling in `AppdnaMappers` that
+ decides whether a key is absent or present-as-`null`.
 
  ## Same cases, same oracles as Android
 
@@ -184,16 +184,26 @@ final class AppdnaMappersTests: XCTestCase {
         XCTAssertEqual(custom["value"] as? String, "big")
     }
 
-    func testSectionActionCompactsNilsRatherThanBridgingNSNull() {
-        // `compact` drops nil values because an ABSENT key is what the other platform sends. An
-        // `NSNull` here would reach JS as `null`, and a host doing `if (action.id)` would be fine while
-        // one doing `'id' in action` would not — the two platforms would disagree.
+    func testSectionActionKeepsNilsAsNSNullForAndroidParity() {
+        // R9 wire-parity: Android's `toActionMap` (SectionContext.kt) builds with `mapOf`, which keeps an
+        // optional key PRESENT-as-null. The iOS mapper matches by emitting `NSNull()` (via `withNulls`),
+        // NOT by dropping the key — otherwise a host doing `'id' in action` / `action.id === null` would
+        // read `undefined` on iOS and `null` on Android for the same input. `NSNull()` reaches JS as
+        // `null` (the same path `last_action` uses; mirrors AppdnaScreenResultWireTests' last_action test).
         let paywall = AppdnaMappers.map(SectionAction.showPaywall(id: nil))
         XCTAssertEqual(paywall["type"] as? String, "showPaywall")
-        XCTAssertNil(paywall["id"])
+        if let paywallId = paywall["id"] {
+            XCTAssertTrue(paywallId is NSNull, "showPaywall.id must be present as NSNull, not a real value")
+        } else {
+            XCTFail("showPaywall.id must be PRESENT as NSNull (Android parity), but the key was omitted")
+        }
 
         let track = AppdnaMappers.map(SectionAction.track(event: "tapped", properties: nil))
         XCTAssertEqual(track["event"] as? String, "tapped")
-        XCTAssertNil(track["properties"])
+        if let trackProps = track["properties"] {
+            XCTAssertTrue(trackProps is NSNull, "track.properties must be present as NSNull, not a real value")
+        } else {
+            XCTFail("track.properties must be PRESENT as NSNull (Android parity), but the key was omitted")
+        }
     }
 }
