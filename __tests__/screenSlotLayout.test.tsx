@@ -99,4 +99,51 @@ describe('W19 — ScreenSlot layout shift', () => {
     // `footer_banner` has never been measured: it must reserve ITS minHeight, not home_promo's 240.
     expect(heightOf(footer)).toBe(60);
   });
+
+  it('bounds the height cache — evicts oldest-first past the cap (no unbounded growth)', () => {
+    // A host using per-item slot names (`row_${id}` in a long list) would grow the module-level Map
+    // without limit; it is capped at 128 with oldest-first eviction. Fill it past the cap.
+    for (let i = 0; i < 129; i++) {
+      let t!: TestRenderer.ReactTestRenderer;
+      act(() => {
+        t = TestRenderer.create(<AppDNAScreenSlot name={`row_${i}`} minHeight={10} />);
+      });
+      measure(t, 200 + i);
+      act(() => t.unmount());
+    }
+    // Inserting row_128 evicted the oldest entry (row_0) → its remount falls back to minHeight.
+    let oldest!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      oldest = TestRenderer.create(<AppDNAScreenSlot name="row_0" minHeight={10} />);
+    });
+    expect(heightOf(oldest)).toBe(10); // evicted, not its old 200
+    // The newest entry survived — remounts at its measured height.
+    let newest!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      newest = TestRenderer.create(<AppDNAScreenSlot name="row_128" minHeight={10} />);
+    });
+    expect(heightOf(newest)).toBe(200 + 128);
+  });
+
+  it('re-seeds height when the name prop changes on a live instance (no stale height from the old name)', () => {
+    // Pre-cache footer_banner at 90.
+    let pre!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      pre = TestRenderer.create(<AppDNAScreenSlot name="footer_banner" minHeight={60} />);
+    });
+    measure(pre, 90);
+    act(() => pre.unmount());
+
+    // A live instance renders home_promo@240, then its `name` prop flips to footer_banner. Without the
+    // renderedName!==name reset it would keep 240 — a block of the wrong height (or empty) forever.
+    let tree!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      tree = TestRenderer.create(<AppDNAScreenSlot name="home_promo" minHeight={120} />);
+    });
+    measure(tree, 240);
+    act(() => {
+      tree.update(<AppDNAScreenSlot name="footer_banner" minHeight={60} />);
+    });
+    expect(heightOf(tree)).toBe(90); // re-seeded from footer_banner's cache, not home_promo's 240
+  });
 });
