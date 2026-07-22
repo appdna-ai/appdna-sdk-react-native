@@ -60,6 +60,23 @@ npm view @appdna-ai/react-native-sdk@1.0.6 deprecated
 
 ---
 
+## 🔴 Publish gate — RN 0.77 / Kotlin 2.0 validation (impl-audit R5, F1)
+
+The `peerDependencies` range is `react-native >=0.76.9` (no upper bound), so it advertises RN 0.77+
+(Kotlin 2.0). That support is currently **compile-validated only, and only by a HYBRID check**
+(`scripts/rn-k2-compile-check.sh` — the RN 0.76.9 example with Kotlin forced to 2.0.x). Before
+publishing a version that keeps the un-capped range, one of these MUST be true:
+
+1. **A real RN ≥ 0.77 app** (not the hybrid) builds the wrapper (`assembleDebug`) AND passes a device
+   e2e (the `<AppDNAScreenSlot>` renders, onboarding/paywall present, events reach BQ), OR
+2. the range is re-capped to `<0.77.0` and the RN-0.77 claim is pulled from the docs until (1) lands.
+
+Do NOT ship the un-capped range on the strength of the hybrid check alone — it never touches a real
+0.77 `react-android` / react-gradle-plugin / codegen, and a runtime Compose-ABI mismatch would surface
+only on device. Also note: on **Expo SDK 53** (Swift AppDelegate) the config plugin warns+skips the
+dynamic-frameworks ScreenSlot registration — a native Swift Fabric-registration path is still a
+follow-up, so the RN-0.77 validation should cover an Expo-53 host too.
+
 ## Release order
 
 The wrapper pins the natives, so the natives must exist on their registries first, or `pod install`
