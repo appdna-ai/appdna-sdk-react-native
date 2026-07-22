@@ -637,8 +637,14 @@ public final class AppdnaModuleImpl: NSObject {
     /// N15 — a `URL` here, a `String` on Android.
     @objc(handleDeepLink:resolve:reject:)
     public func handleDeepLink(_ url: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        // Resolve-don't-fork (the same cross-platform reconciliation already applied to presentPaywall's
+        // NO_VIEW_CONTROLLER/NO_ACTIVITY fork): Android's handleDeepLink never validates and ALWAYS
+        // resolves, and `handleURL` is called fire-and-forget — so a string that `URL(string:)` refuses
+        // must NOT become an iOS-only promise rejection (an unhandled rejection / redbox on iOS while
+        // Android no-ops for the identical input). Drop the unparseable string and resolve, matching
+        // Android's observable outcome; the host never has to branch on `Platform.OS`.
         guard let parsed = URL(string: url) else {
-            return reject("BAD_URL", "handleDeepLink received a string that is not a URL", nil)
+            return resolve(nil)
         }
         AppDNA.deepLinks.handleURL(parsed)
         resolve(nil)
