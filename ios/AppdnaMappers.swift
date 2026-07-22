@@ -111,6 +111,12 @@ enum AppdnaMappers {
 
     /// `{questionId, answer}`. `answer` is `Any` natively — a string, a number, a bool or a list —
     /// and crosses as-is; a type the bridge cannot represent is a mapper bug, not a runtime state.
+    ///
+    /// ⚠ Asymmetry, recorded rather than hidden: Android's `SurveyResponse` also carries `metadata`
+    /// (emitted when present — `AppdnaMappers.kt:109`), but iOS's `SurveyResponse` struct has no such
+    /// field, so a JS host reads `response.metadata` on Android and `undefined` on iOS. This is a
+    /// native-capability gap (omit-not-fake, the same class as the Entitlement/ProductInfo union
+    /// fields), not a wrapper bug: closing it needs an iOS core change, not a mapper change.
     static func map(_ response: SurveyResponse) -> [String: Any] {
         ["questionId": response.questionId, "answer": response.answer]
     }
