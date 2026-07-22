@@ -134,30 +134,36 @@ enum AppdnaMappers {
         case .openAppSettings: return ["type": "openAppSettings"]
         case .share(let text): return ["type": "share", "text": text]
         case .deepLink(let url): return ["type": "deepLink", "url": url]
-        case .showPaywall(let id): return compact(["type": "showPaywall", "id": id])
-        case .showSurvey(let id): return compact(["type": "showSurvey", "id": id])
+        case .showPaywall(let id): return withNulls(["type": "showPaywall", "id": id])
+        case .showSurvey(let id): return withNulls(["type": "showSurvey", "id": id])
         case .showScreen(let id): return ["type": "showScreen", "id": id]
         case .submitForm(let data): return ["type": "submitForm", "data": data]
-        case .track(let event, let properties): return compact(["type": "track", "event": event, "properties": properties])
+        case .track(let event, let properties): return withNulls(["type": "track", "event": event, "properties": properties])
         case .haptic(let type): return ["type": "haptic", "hapticType": type]
-        case .custom(let type, let value): return compact(["type": "custom", "customType": type, "value": value])
+        case .custom(let type, let value): return withNulls(["type": "custom", "customType": type, "value": value])
         // Flow-level verbs. Discriminators + field names are Android's `toActionMap`
         // (`screens/SectionContext.kt:94-103`) verbatim — the wire must not fork per platform.
         case .restart: return ["type": "restart"]
         case .complete: return ["type": "complete"]
-        case .setResponse(let key, let value): return compact(["type": "setResponse", "key": key, "value": value])
-        case .presentPaywall(let id): return compact(["type": "presentPaywall", "id": id])
+        case .setResponse(let key, let value): return withNulls(["type": "setResponse", "key": key, "value": value])
+        case .presentPaywall(let id): return withNulls(["type": "presentPaywall", "id": id])
         case .dismissPaywall: return ["type": "dismissPaywall"]
-        case .showMessage(let id): return compact(["type": "showMessage", "id": id])
-        case .setUserProperty(let key, let value): return compact(["type": "setUserProperty", "key": key, "value": value])
+        case .showMessage(let id): return withNulls(["type": "showMessage", "id": id])
+        case .setUserProperty(let key, let value): return withNulls(["type": "setUserProperty", "key": key, "value": value])
         case .purchase(let productId): return ["type": "purchase", "productId": productId]
         case .restore: return ["type": "restore"]
         }
     }
 
-    /// Drop nil values rather than bridging `NSNull`: an absent key is what the other platform sends.
-    private static func compact(_ dict: [String: Any?]) -> [String: Any] {
-        dict.compactMapValues { $0 }
+    /// Preserve every key, bridging a nil value as `NSNull()`. Android's `toActionMap`
+    /// (`screens/SectionContext.kt:77-104`) and its `LocationData` map (`AppdnaMappers.kt:119-132`) both
+    /// build with `mapOf`, which keeps an optional key PRESENT-as-null. Dropping the key here would make
+    /// a JS host read `undefined` on iOS but `null` on Android for the SAME input — the exact
+    /// `undefined`-vs-`null` fork that `map(ScreenResult)` emits `NSNull()` for `last_action` to prevent
+    /// (see :180). The rule is "match the other platform", not "be uniform with ourselves": Android keeps
+    /// the null, so we keep the null. (Was `compact`/compactMapValues — R9 wire-parity fix.)
+    private static func withNulls(_ dict: [String: Any?]) -> [String: Any] {
+        dict.mapValues { $0 ?? NSNull() }
     }
     /**
      * P8 — the 9th delegate's result payloads.
@@ -227,7 +233,7 @@ enum AppdnaMappers {
     /// P8 — the onboarding location field's structured answer. Keys match Android's exactly (both
     /// natives already declare them in snake_case), so the two wires agree without translation.
     static func map(_ loc: LocationData) -> [String: Any] {
-        compact([
+        withNulls([
             "formatted_address": loc.formatted_address,
             "city": loc.city,
             "state": loc.state,
