@@ -498,12 +498,12 @@ enum AppdnaVetoDecoder {
         guard let map = reply as? [String: Any] else { return .proceed }
         switch (map["type"] as? String) ?? "proceed" {
         case "proceedWithData":
-            return .proceedWithData(map["data"] as? [String: Any] ?? [:])
+            return .proceedWithData(anyMap(map["data"]) ?? [:])
         case "block":
             return .block(message: (map["message"] as? String) ?? "")
         case "skipTo", "skipToWithData":
             let stepId = (map["stepId"] as? String) ?? ""
-            if let data = map["data"] as? [String: Any], !data.isEmpty {
+            if let data = anyMap(map["data"]), !data.isEmpty {
                 return .skipToWithData(stepId: stepId, data: data)
             }
             return .skipTo(stepId: stepId)
@@ -531,11 +531,11 @@ enum AppdnaVetoDecoder {
         if isUnhandled(reply) { return nil }
         guard let map = reply as? [String: Any] else { return nil }
         return StepConfigOverride(
-            fieldDefaults: map["fieldDefaults"] as? [String: Any],
+            fieldDefaults: anyMap(map["fieldDefaults"]),
             title: map["title"] as? String,
             subtitle: map["subtitle"] as? String,
             ctaText: map["ctaText"] as? String,
-            layoutOverrides: map["layoutOverrides"] as? [String: Any]
+            layoutOverrides: anyMap(map["layoutOverrides"])
         )
     }
 
@@ -547,13 +547,13 @@ enum AppdnaVetoDecoder {
         if let raw = map["fieldConfigPatches"] as? [String: Any] {
             var out: [String: [String: Any]] = [:]
             for (key, value) in raw {
-                if let inner = value as? [String: Any] { out[key] = inner }
+                if let inner = anyMap(value) { out[key] = inner }
             }
             patches = out
         }
         return ElementInteractionResult(
             fieldConfigPatches: patches,
-            inputValuePatches: map["inputValuePatches"] as? [String: Any],
+            inputValuePatches: anyMap(map["inputValuePatches"]),
             advance: (map["advance"] as? Bool) ?? false
         )
     }
@@ -567,5 +567,18 @@ enum AppdnaVetoDecoder {
         default:
             return .proceed
         }
+    }
+
+    /// A veto-reply sub-object with JSON-null (`NSNull`) entries dropped — mirrors Android's
+    /// `AppdnaVetoDecoder.anyMap` (AppdnaDelegates.kt:601). A `null` value inside a veto reply means
+    /// "no override for this key", and an ABSENT key is exactly what the SDK's own no-delegate path
+    /// produces. Without this, iOS decoded (via `.fragmentsAllowed`) a nested JSON null as `NSNull` and
+    /// KEPT it, so a host reply like `{"fieldDefaults":{"promo_code":null}}` CLEARED the field default on
+    /// iOS while Android left it untouched — a different rendered step from identical config + reply.
+    /// Returns nil only when the value is not an object (an absent key), preserving the present-vs-absent
+    /// distinction; a present object simply loses its null-valued entries.
+    private static func anyMap(_ value: Any?) -> [String: Any]? {
+        guard let map = value as? [String: Any] else { return nil }
+        return map.filter { !($0.value is NSNull) }
     }
 }

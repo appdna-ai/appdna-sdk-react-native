@@ -653,6 +653,13 @@ public final class AppdnaModuleImpl: NSObject {
         // must NOT become an iOS-only promise rejection (an unhandled rejection / redbox on iOS while
         // Android no-ops for the identical input). Drop the unparseable string and resolve, matching
         // Android's observable outcome; the host never has to branch on `Platform.OS`.
+        //
+        // ⚠ Recorded native-shape asymmetry (edge-case only): for a string `URL(string:)` refuses but
+        // Android's SDK would still take, the SIDE EFFECT differs — Android forwards the raw String to
+        // its String-typed core (firing `onDeepLinkReceived` + the allowlist), while iOS cannot build a
+        // `URL` to hand its URL-typed core, so it drops it. `URL(string:)` is lenient, so this bites only
+        // genuinely malformed links that route to nothing useful anyway; it is not fixable in the wrapper
+        // without an iOS core that accepts a raw String.
         guard let parsed = URL(string: url) else {
             return resolve(nil)
         }

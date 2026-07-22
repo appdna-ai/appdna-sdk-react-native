@@ -146,4 +146,22 @@ final class AppdnaAuthActionGateTests: XCTestCase {
             return XCTFail("a non-auth step must still take native's default")
         }
     }
+
+    /// R20 — a JSON null inside a veto-reply object must be STRIPPED, not kept as `NSNull`. Android's
+    /// `AppdnaVetoDecoder.anyMap` drops it ("an absent key is exactly what the no-delegate path
+    /// produces"), so iOS must too, via the same `anyMap`. Otherwise a null in `proceedWithData.data`
+    /// (and, through the same helper, in `StepConfigOverride`/`ElementInteractionResult`) reaches the
+    /// SDK as an explicit `NSNull` override on iOS ONLY — a different rendered step / merged response
+    /// from the identical host reply.
+    func testNestedNullInAVetoReplyIsStrippedLikeAndroid() async {
+        let result = await advance(
+            reply: #"{"type":"proceedWithData","data":{"promo_code":null,"keep":"yes"}}"#,
+            action: nil
+        )
+        guard case let .proceedWithData(data) = result else {
+            return XCTFail("expected .proceedWithData, got \(result)")
+        }
+        XCTAssertEqual(data["keep"] as? String, "yes")
+        XCTAssertNil(data["promo_code"], "a null-valued key must be dropped (Android parity), not kept as NSNull")
+    }
 }
