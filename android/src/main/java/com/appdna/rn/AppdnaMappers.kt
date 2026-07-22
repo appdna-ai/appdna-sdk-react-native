@@ -82,6 +82,18 @@ internal object AppdnaMappers {
             put("action_type", it.type)
             put("action_value", it.value)
         }
+        // The registered action BUTTONS. Native has always sent these; the wrapper used to drop the
+        // whole list, so a host that got an `actionId` on tap could not look up the button.
+        if (payload.actions.isNotEmpty()) {
+            put("actions", payload.actions.map { btn ->
+                buildMap<String, Any?> {
+                    put("id", btn.id)
+                    put("label", btn.label)
+                    put("action_type", btn.type)
+                    btn.value?.let { put("action_value", it) }
+                }
+            })
+        }
     }
 
     /**

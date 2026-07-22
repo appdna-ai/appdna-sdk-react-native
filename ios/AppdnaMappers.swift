@@ -90,6 +90,18 @@ enum AppdnaMappers {
             out["action_type"] = action.type
             out["action_value"] = action.value
         }
+        // The registered action BUTTONS. Native has always sent these; the wrapper used to drop the
+        // whole list, so a host that got an `actionId` on tap could not look up the button.
+        if !payload.actions.isEmpty {
+            out["actions"] = payload.actions.map { a -> [String: Any] in
+                [
+                    "id": a.id ?? "",
+                    "label": a.label ?? "",
+                    "action_type": a.type,
+                    "action_value": a.value,
+                ]
+            }
+        }
         return out
     }
 

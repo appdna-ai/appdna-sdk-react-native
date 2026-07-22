@@ -1,13 +1,25 @@
 import { AppdnaModule, addNativeListener } from './nativeModule';
 
+/** One structured notification action button (SPEC-070-A). `id` echoes back as `onPushTapped`'s actionId. */
+export interface PushAction {
+  id: string;
+  label: string;
+  action_type: string;
+  action_value?: string;
+}
+
 export interface PushPayload {
   push_id: string;
   title: string;
   body: string;
   image_url?: string;
   data?: Record<string, string>;
+  /** The notification-body action, flattened. */
   action_type?: string;
   action_value?: string;
+  /** The registered action BUTTONS. `onPushTapped(actionId)` identifies which was tapped — look it
+   *  up here for its type/value/label. (Native has always sent these; the wrappers used to drop them.) */
+  actions?: PushAction[];
 }
 
 /** The native event payloads. Native wraps the notification, because an event payload is an object. */
