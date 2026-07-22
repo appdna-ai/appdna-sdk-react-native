@@ -549,7 +549,13 @@ export class AppDNA {
       // Replaces the previous delegate's listeners rather than stacking a second set on top.
       setDelegateListeners('surveys', () => !delegate ? [] : [
         addNativeListener<{ surveyId: string }>('onSurveyPresented', (data) => delegate?.onSurveyPresented?.(data.surveyId)),
-        addNativeListener<{ surveyId: string; responses: Array<Record<string, unknown>> }>('onSurveyCompleted', (data) => delegate?.onSurveyCompleted?.(data.surveyId, data.responses)),
+        addNativeListener<{ surveyId: string; responses: Array<Record<string, unknown>> }>('onSurveyCompleted', (data) => {
+          delegate?.onSurveyCompleted?.(data.surveyId, data.responses);
+          // Deprecated shim (1.0.5). Native never emitted `onSurveySubmitted`; forwarding the first
+          // response keeps a host that kept the old single-response handler from silently going deaf on
+          // upgrade. Mirrors the `onMessagePresented` shim above (its twin was already wired; this was not).
+          delegate?.onSurveySubmitted?.(data.surveyId, data.responses[0] ?? {});
+        }),
         addNativeListener<{ surveyId: string }>('onSurveyDismissed', (data) => delegate?.onSurveyDismissed?.(data.surveyId)),
       ]);
     },

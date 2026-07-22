@@ -64,6 +64,12 @@ android {
         // The Compose compiler hard-fails when its extension version doesn't exactly match the
         // Kotlin it runs under. Because this wrapper inherits the consumer's Kotlin (default 1.9.22,
         // example host 1.9.25), suppress the check so one extension serves every supported Kotlin.
+        //
+        // ⚠ This standalone-extension + suppress mechanism is a Kotlin 1.9 construct. Kotlin 2.0
+        // (RN >= 0.77) MOVED the Compose compiler into the `org.jetbrains.kotlin.plugin.compose`
+        // Gradle plugin and REJECTS this path — so the wrapper cannot build under Kotlin 2.0. That is
+        // why the consumer peer range caps at `<0.77.0` (package.json). Supporting RN 0.77+ needs a
+        // Kotlin-version-gated Compose-plugin apply + a real 0.77 device build (follow-up, unvalidated).
         freeCompilerArgs += [
             "-P",
             "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=$kotlin_version"

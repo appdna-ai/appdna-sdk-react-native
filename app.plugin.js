@@ -1,8 +1,10 @@
 /**
  * SPEC-070-B D-q / D-q1 — Expo config plugin for @appdna-ai/react-native-sdk.
  *
- * Floor: **Expo SDK 52**. ⚠ SDK 52 pins React Native 0.76 exactly, and no Expo SDK ships RN 0.77 or
- * 0.78 (SDK 53 starts at 0.79). The `0.76.9–0.77.x` band in D-c is bare-RN only.
+ * Floor: **Expo SDK 52** (pins React Native 0.76 exactly — inside our supported range). ⚠ The peer
+ * range caps at `<0.77.0`: RN 0.77+ ships Kotlin 2.0, which rejects this module's Kotlin-1.9 Compose
+ * config (see android/build.gradle). So Expo SDK 53 (RN 0.79 / Kotlin 2.0) is NOT yet supported, and
+ * the bare-RN band D-c validates is `0.76.9–0.76.x`, not the earlier 0.77.x.
  *
  * ## What this plugin must do, and what it must not
  *
