@@ -89,6 +89,13 @@ export type {
 let _configSnapshot: Record<string, unknown> | null = null;
 let _configSnapshotSub: { remove: () => void } | null = null;
 
+// Configure/shutdown generation token. `shutdown()` bumps it; `configure()` captures it before its
+// `await` and skips its post-await lifecycle work if a shutdown landed in between. Without it, a
+// shutdown() completing during configure()'s await lets the continuation re-latch the entitlement
+// observer as "started" on a torn-down SDK — then the NEXT real configure() short-circuits and leaves
+// `onEntitlementsChanged` silently dead (the same teardown-race class as `_configSnapshot`).
+let _configureGen = 0;
+
 /**
  * Invoke a SYNCHRONOUS, void, fire-and-forget native method safely.
  *
@@ -126,7 +133,14 @@ export class AppDNA {
     // and native would sit out the full veto timeout (5 s by default) before applying its default:
     // a five-second freeze before every onboarding step, every deep link, every in-app message.
     installHostCallbackDispatcher();
+    const gen = _configureGen;
     await AppdnaModule.configure(apiKey, env, options);
+    // If a shutdown() completed while native configure was in flight, do NOT run the post-await
+    // lifecycle work against the torn-down SDK: resumeEntitlementObserver() would re-latch the observer
+    // as "started", and the next real configure() would then short-circuit and never re-send
+    // startEntitlementObserver — leaving onEntitlementsChanged silently dead (same teardown-race class
+    // as the config snapshot). The generation token, bumped by shutdown(), detects that interleaving.
+    if (_configureGen !== gen) return;
     // 🔴 Native `shutdown()` drops every entitlement handler it holds. A JS listener registered once
     // at startup — the normal integration — survives that, so after `shutdown() → configure()` it was
     // still subscribed to an emitter nobody was feeding: `onEntitlementsChanged` never fired again for
@@ -777,6 +791,9 @@ export class AppDNA {
    * now checked by `check:rn-docs-api`, which reads the Swift body before believing prose about it.)
    */
   static async shutdown(): Promise<void> {
+    // Invalidate any in-flight configure()'s post-await lifecycle work (see _configureGen): a configure
+    // still awaiting native must not resume the entitlement observer on top of this teardown.
+    _configureGen++;
     // W16 — drop the config snapshot and its refresh subscription so a shutdown→configure cycle does
     // not serve pre-shutdown config, and the listener is not left dangling.
     _configSnapshotSub?.remove();

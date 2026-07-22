@@ -130,4 +130,36 @@ describe('a subscriber that outlives a shutdown keeps receiving entitlements', (
 
     expect(startObserver).toHaveBeenCalledTimes(1);
   });
+
+  it('a shutdown completing DURING configure()\'s await does not leave the observer dead', async () => {
+    // R18: the same teardown-race class as the config snapshot, on the entitlement observer. configure()
+    // resumes the observer in its post-await continuation; if a shutdown() completes while that await is
+    // pending, the resume must be SKIPPED — otherwise it re-latches the observer as "started" on the
+    // torn-down SDK, and the next real configure() short-circuits and leaves onEntitlementsChanged dead.
+    await AppDNA.configure('adn_test', 'production');
+    const seen: unknown[][] = [];
+    AppDNA.billing.onEntitlementsChanged((e) => seen.push(e as unknown[]));
+    expect(startObserver).toHaveBeenCalledTimes(1);
+    startObserver.mockClear();
+
+    // The next configure's native call is slow; shutdown() lands and completes before it resolves.
+    let resolveConfigure!: () => void;
+    (mockModule.configure as jest.Mock).mockReturnValueOnce(
+      new Promise<void>((r) => { resolveConfigure = () => r(); }),
+    );
+    const configuring = AppDNA.configure('adn_test', 'production'); // in flight
+    await AppDNA.shutdown(); // completes: resets the observer latch AND bumps the configure generation
+    resolveConfigure();
+    await configuring; // configure's post-await resume MUST be skipped (a shutdown intervened)
+
+    // If the racy resume had run, this would be 1 (wasted on the torn-down SDK) and the latch would be
+    // stuck "started", so the proper restart below would never re-arm. The generation guard prevents it.
+    expect(startObserver).toHaveBeenCalledTimes(0);
+
+    // The proper restart re-arms native for the still-live subscriber, and events flow again.
+    await AppDNA.configure('adn_test', 'production');
+    expect(startObserver).toHaveBeenCalledTimes(1);
+    emitEntitlementChange();
+    expect(seen).toHaveLength(1);
+  });
 });
