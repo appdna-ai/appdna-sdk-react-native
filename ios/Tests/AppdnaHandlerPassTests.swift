@@ -231,16 +231,29 @@ final class AppdnaHandlerPassTests: XCTestCase {
     /// always resolves; iOS used to REJECT with `BAD_URL` when `URL(string:)` returned nil. Called
     /// fire-and-forget, that reject surfaced as an unhandled rejection on iOS ONLY. iOS now resolves
     /// (drops the unparseable string) to match Android and the wrapper's resolve-don't-fork convention.
-    /// The `XCTAssertNil` premise makes this non-vacuous: if the input ever parsed, the guard-else would
-    /// be unreachable and this fails loudly rather than passing on the resolve path trivially. A newline
-    /// is a control character `URL(string:)` refuses in every iOS version.
+    /// The premise makes this non-vacuous: if the input parsed, the guard-else would be unreachable
+    /// and the test would pass trivially on the resolve path.
+    ///
+    /// 🔴 The premise was a hard-coded `"bad\nurl"` on the claim that a newline "is a control character
+    /// `URL(string:)` refuses in every iOS version". That stopped being true: swift-foundation's modern
+    /// parser PERCENT-ENCODES it (`bad%0Aurl`) and returns a URL, so the premise assert started failing
+    /// on newer toolchains — a red test for a toolchain change, not a regression. Probe a candidate set
+    /// and use the first string THIS Foundation actually refuses, so the guard-else stays reachable on
+    /// every version; fail loudly only if none of them are refused (which would make the guard vacuous).
     func testHandleDeepLinkResolvesForUnparseableURLRatherThanRejecting() {
-        XCTAssertNil(URL(string: "bad\nurl"), "test premise: the input must be genuinely unparseable")
+        let candidates = ["http://[", "http://[v1.x", "bad\nurl", ""]
+        guard let unparseable = candidates.first(where: { URL(string: $0) == nil }) else {
+            return XCTFail(
+                "test premise: no candidate was unparseable on this Foundation — the guard-else in "
+                    + "handleDeepLink is unreachable, so this parity guard would be vacuous. Add an "
+                    + "input this version refuses."
+            )
+        }
         let impl = AppdnaModuleImpl()
         var outcome = "neither"
         let res: RCTPromiseResolveBlock = { _ in outcome = "resolved" }
         let rej: RCTPromiseRejectBlock = { code, _, _ in outcome = "rejected: \(code ?? "?")" }
-        impl.handleDeepLink("bad\nurl", resolve: res, reject: rej)
+        impl.handleDeepLink(unparseable, resolve: res, reject: rej)
         XCTAssertEqual(outcome, "resolved",
                        "handleDeepLink must resolve (like Android), not reject, on an unparseable URL")
     }
