@@ -76,7 +76,13 @@ final class AppdnaHandlerPassTests: XCTestCase {
         let bootRej: RCTPromiseRejectBlock = { _, _, _ in }
         impl.configure("adn_test_placeholder", env: "sandbox", options: [:] as NSDictionary, resolve: bootRes, reject: bootRej)
         AppDNA.onReady { ready.fulfill() }
-        wait(for: [ready], timeout: 30)
+        // 120s, not 30s. Reaching ready runs a REAL bootstrap attempt (this key is a placeholder, so
+        // it is the failure path — network + retry/backoff before the SDK settles into degraded-ready).
+        // That is wall-clock work on a shared macOS runner, and 30s went red here on a loaded one while
+        // passing on a quiet one — a flake that says nothing about the wrapper. The generous ceiling
+        // costs nothing on a healthy run (the expectation fulfils as soon as ready fires) and only
+        // changes how long a genuine never-ready hang takes to report.
+        wait(for: [ready], timeout: 120)
 
         // ── Every bridged method, driven against a live singleton ────────────────
         //
